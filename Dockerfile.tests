@@ -1,0 +1,11 @@
+FROM jticker/controller
+
+USER root
+
+COPY --chown=app:app requirements-dev.txt /app/
+
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+USER app
+
+ENTRYPOINT ["/app/run.sh", "test"]
