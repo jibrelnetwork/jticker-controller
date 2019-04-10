@@ -1,36 +1,11 @@
-import sys
-import logging.config
+import os
 
 from aiohttp import web
 
 from .handlers import (
     home,
 )
-
-
-logging.config.dictConfig({
-    'version': 1,
-    'disable_existing_loggers': False,
-    'formatters': {
-        'default': {
-            'class': 'logging.Formatter',
-            'format': '%(asctime)s %(levelname)-8s %(message)s',
-        }
-    },
-    'handlers': {
-        'console': {
-            '()': 'logging.StreamHandler',
-            'stream': sys.stdout,
-            'formatter': 'default',
-        },
-    },
-    'loggers': {
-        'jticker_controller': {
-            'level': 'DEBUG',
-            'handlers': ['console'],
-        },
-    }
-})
+from .logging import _configure_logging
 
 
 async def on_shutdown(app):
@@ -40,6 +15,8 @@ async def on_shutdown(app):
 async def make_app(argv=None):
     """Create and initialize the application instance.
     """
+    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+    _configure_logging(LOG_LEVEL)
     app = web.Application()
     app['config'] = {}
 
