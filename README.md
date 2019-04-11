@@ -1,2 +1,5 @@
-# jticker-controller
-Jticker grabber controller
+# Jticker Controller
+
+Jticker management app.
+
+**TBD**
