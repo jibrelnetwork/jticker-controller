@@ -1,11 +1,22 @@
 import os
 
+import sentry_sdk
+from sentry_sdk.integrations.aiohttp import AioHttpIntegration
+
 from aiohttp import web
 
 from .handlers import (
     home,
 )
 from .logging import _configure_logging
+
+
+SENTRY_DSN = os.getenv('SENTRY_DSN')
+
+if SENTRY_DSN:
+    with open('version.txt', 'r') as fp:
+        sentry_sdk.init(SENTRY_DSN, release=fp.read().strip(),
+                        integrations=[AioHttpIntegration()])
 
 
 async def on_shutdown(app):
