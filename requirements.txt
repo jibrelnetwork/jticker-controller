@@ -2,5 +2,6 @@ gunicorn==19.9.0
 aiohttp==3.5.4
 
 sentry-sdk==0.7.10
+python-json-logger==0.1.11
 
 click==7.0.0

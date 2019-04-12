@@ -10,7 +10,7 @@ def _configure_logging(log_level='INFO'):
         'version': 1,
         'formatters': {
             'default': {
-                'class': 'logging.Formatter',
+                'class': 'pythonjsonlogger.jsonlogger.JsonFormatter',
                 'format': '%(asctime)s %(levelname)-8s %(message)s'
             }
         },
