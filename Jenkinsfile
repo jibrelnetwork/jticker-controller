@@ -31,5 +31,6 @@ builder(
                                 'mkdir -p /junit-reports',
                                 'pytest --junitxml=/junit-reports/pytest-junit-report.xml --cov-report xml:/coverage-reports/pytest-coverage-report.xml',
                         ],
+                ],
         ],
 )
