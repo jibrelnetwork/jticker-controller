@@ -25,4 +25,4 @@ RUN pip install --no-cache-dir -e ./jticker-core -e ./
 
 USER app
 
-ENTRYPOINT ["python", "-m", "jitcker_controller"]
+ENTRYPOINT ["python", "-m", "jticker_controller"]
