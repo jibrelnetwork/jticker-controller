@@ -9,6 +9,9 @@ RUN addgroup -g 111 app \
  && mkdir -p /app \
  && chown -R app:app /app
 
+# build dependencies
+RUN apk update && apk add gcc musl-dev git
+
 # optional aiokafka dependency https://aiokafka.readthedocs.io/en/stable/#optional-snappy-install
 # RUN apk update && apk add snappy-dev
 
@@ -18,7 +21,7 @@ COPY --chown=app:app requirements.txt /app/
 RUN pip install -r requirements.txt
 
 COPY --chown=app:app . /app
-RUN pip install -e ./jticker-core -e ./
+RUN pip install --no-cache-dir -e ./jticker-core -e ./
 
 USER app
 
