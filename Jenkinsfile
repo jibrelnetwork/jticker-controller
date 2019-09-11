@@ -12,7 +12,7 @@ builder(
                         entrypoint: "",
                         jUnitPath: '/junit-reports',
                         command: [
-                                'poetry install',
+                                'pip install -e ./[dev]',
                                 'mkdir -p /junit-reports',
                                 'pylama',
                                 'mypy --junit-xml=/junit-reports/mypy-junit-report.xml .',
@@ -27,7 +27,7 @@ builder(
                         jUnitPath: '/junit-reports',
                         coveragePath: '/coverage-reports',
                         command: [
-                                'poetry install',
+                                'pip install -e ./[dev]',
                                 'mkdir -p /junit-reports',
                                 'pytest --junitxml=/junit-reports/pytest-junit-report.xml --cov-report xml:/coverage-reports/pytest-coverage-report.xml',
                         ],
