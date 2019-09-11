@@ -18,7 +18,7 @@ RUN apk update && apk add gcc musl-dev git
 WORKDIR /app
 
 COPY --chown=app:app requirements.txt /app/
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=app:app . /app
 RUN pip install --no-cache-dir -e ./jticker-core -e ./
