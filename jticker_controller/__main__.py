@@ -25,7 +25,7 @@ def version() -> str:
 @register(singleton=True)
 @inject
 def config(version: str) -> Dict:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser("jticker_controller")
     parser.add_argument("--sentry-dsn", default=None, help="Sentry DSN [default: %(default)s]")
     parser.add_argument("--log-level", default="INFO",
                         help="Python logging level [default: %(default)s]")
