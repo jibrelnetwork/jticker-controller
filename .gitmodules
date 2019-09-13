@@ -1,0 +1,3 @@
+[submodule "jticker-core"]
+	path = jticker-core
+	url = git@github.com:jibrelnetwork/jticker-core.git
