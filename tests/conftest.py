@@ -30,7 +30,7 @@ class _FakeKafka:
 
 class _FakeAioKafkaProducer:
 
-    def __init__(self, _fake_kafka, loop, bootstrap_servers):
+    def __init__(self, _fake_kafka, loop, bootstrap_servers, **_):
         self._fake_kafka = _fake_kafka
 
     async def start(self):
