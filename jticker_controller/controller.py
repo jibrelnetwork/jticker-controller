@@ -28,6 +28,7 @@ class Controller(Service):
 
     def _configure_router(self):
         self.web_server.app.router.add_route("POST", "/task/add", self._add_task)
+        self.web_server.app.router.add_route("GET", "/healthcheck", self._healthcheck)
 
     def on_init_dependencies(self):
         return [
@@ -52,3 +53,6 @@ class Controller(Service):
             value=task.as_json(),
         )
         raise web.HTTPOk()
+
+    async def _healthcheck(self, request):
+        return web.json_response(dict(healthy=True))

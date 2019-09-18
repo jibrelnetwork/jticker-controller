@@ -13,3 +13,9 @@ async def test_add_task(client, mocked_kafka):
     t = Task.from_json(tasks[0])
     assert t.provider == "ex"
     assert t.symbols == ["BTCUSD"]
+
+
+@pytest.mark.asyncio
+async def test_healthcheck(client):
+    d = await client("GET", "healthcheck")
+    assert d == dict(healthy=True)
