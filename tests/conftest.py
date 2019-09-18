@@ -63,6 +63,7 @@ def _injector(unused_tcp_port):
     injector.register(lambda: config, name="config")
     injector.register(lambda: "127.0.0.1", name="host")
     injector.register(lambda: str(unused_tcp_port), name="port")
+    injector.register(lambda: "TEST_VERSION", name="version")
     return injector
 
 

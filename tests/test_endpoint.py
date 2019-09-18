@@ -18,4 +18,4 @@ async def test_add_task(client, mocked_kafka):
 @pytest.mark.asyncio
 async def test_healthcheck(client):
     d = await client("GET", "healthcheck")
-    assert d == dict(healthy=True)
+    assert d == dict(healthy=True, version="TEST_VERSION")
