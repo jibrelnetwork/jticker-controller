@@ -14,7 +14,7 @@ from jticker_core import inject, register, WebServer, Task
 class Controller(Service):
 
     @inject
-    def __init__(self, web_server: WebServer, config: Dict):
+    def __init__(self, web_server: WebServer, config: Dict, version: str):
         super().__init__()
         self.web_server = web_server
         self._producer = AIOKafkaProducer(
@@ -23,10 +23,12 @@ class Controller(Service):
             value_serializer=lambda s: s.encode("utf-8"),
         )
         self._task_topic = config.kafka_tasks_topic
+        self._version = version
         self._configure_router()
 
     def _configure_router(self):
         self.web_server.app.router.add_route("POST", "/task/add", self._add_task)
+        self.web_server.app.router.add_route("GET", "/healthcheck", self._healthcheck)
 
     def on_init_dependencies(self):
         return [
@@ -51,3 +53,6 @@ class Controller(Service):
             value=task.as_json(),
         )
         raise web.HTTPOk()
+
+    async def _healthcheck(self, request):
+        return web.json_response(dict(healthy=True, version=self._version))

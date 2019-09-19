@@ -4,12 +4,13 @@ from functools import partial
 
 import pytest
 from addict import Dict
-from aiohttp import ClientSession
+from aiohttp import ClientSession, web
 
 from jticker_core import injector
 
 from jticker_controller.controller import Controller
 from jticker_controller import controller as controller_module
+from jticker_core import WebServer
 
 
 class _FakeKafka:
@@ -62,12 +63,23 @@ def _injector(unused_tcp_port):
     injector.register(lambda: config, name="config")
     injector.register(lambda: "127.0.0.1", name="host")
     injector.register(lambda: str(unused_tcp_port), name="port")
+    injector.register(lambda: "TEST_VERSION", name="version")
     return injector
 
 
 @pytest.fixture
-async def controller():
-    async with Controller() as controller:
+async def _web_app():
+    return web.Application()
+
+
+@pytest.fixture
+async def _web_server(_web_app):
+    return WebServer(web_app=_web_app)
+
+
+@pytest.fixture
+async def controller(_web_server):
+    async with Controller(web_server=_web_server) as controller:
         yield controller
 
 
