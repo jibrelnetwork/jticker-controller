@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 
 import backoff
 from aiohttp import web
@@ -52,6 +53,7 @@ class Controller(Service):
         await self._producer.send_and_wait(
             self._task_topic,
             value=task.as_json(),
+            key=uuid.uuid4().hex,
         )
         raise web.HTTPOk()
 
