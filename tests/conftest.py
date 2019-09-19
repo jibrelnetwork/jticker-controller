@@ -42,6 +42,8 @@ class _FakeAioKafkaProducer:
 
     async def send_and_wait(self, topic, value=None, key=None):
         assert re.match("^[a-zA-Z0-9\\._\\-]+$", topic)
+        assert isinstance(value, str)
+        assert isinstance(key, str)
         self._fake_kafka.put(topic, value)
 
 
