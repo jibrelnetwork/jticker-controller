@@ -5,13 +5,13 @@ from jticker_core import Task
 
 @pytest.mark.asyncio
 async def test_add_task(client, mocked_kafka):
-    await client("POST", "task/add", _raw=True, provider="ex", symbols=["BTCUSD"])
+    await client("POST", "task/add", _raw=True, providers=["ex"], symbols=["BTCUSD"])
     assert len(mocked_kafka.data) == 1
     assert "grabber_tasks" in mocked_kafka.data
     tasks = mocked_kafka.data["grabber_tasks"]
     assert len(tasks) == 1
     t = Task.from_json(tasks[0])
-    assert t.provider == "ex"
+    assert t.providers == ["ex"]
     assert t.symbols == ["BTCUSD"]
 
 
