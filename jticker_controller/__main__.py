@@ -17,7 +17,7 @@ from .controller import Controller
 @register(singleton=True)
 def version() -> str:
     try:
-        return Path(__file__).parent.parent.joinpath("version.txt").read_text()
+        return Path(__file__).parent.parent.joinpath("version.txt").read_text().strip()
     except Exception:
         return "dev"
 
@@ -41,6 +41,21 @@ def config(version: str) -> Dict:
                         help="Comma separated kafka bootstrap servers [default: %(default)s]")
     parser.add_argument("--kafka-tasks-topic", default="grabber_tasks",
                         help="Tasks kafka topic [default: %(default)s]")
+    # influx
+    parser.add_argument("--influx-host", default="influxdb",
+                        help="Influxdb hosts (comma separated) [default: %(default)s]")
+    parser.add_argument("--influx-port", default="8086",
+                        help="Influxdb port [default: %(default)s]")
+    parser.add_argument("--influx-db", default="test",
+                        help="Influxdb db [default: %(default)s]")
+    parser.add_argument("--influx-username", default=None, help="Influxdb username [%(default)s]")
+    parser.add_argument("--influx-password", default=None, help="Influxdb password [%(default)s]")
+    parser.add_argument("--influx-ssl", action="store_true", default=False,
+                        help="Influxdb use ssl [%(default)s]")
+    parser.add_argument("--influx-unix-socket", default=None,
+                        help="Influxdb unix socket [%(default)s]")
+    parser.add_argument("--influx-chunk-size", default="1000",
+                        help="Influx batch/chunk write size [%(default)s]")
     args = vars(parser.parse_args())
     env = {k.lower(): v for k, v in os.environ.items() if k.lower() in args}
     return Dict(**collections.ChainMap(env, args))
