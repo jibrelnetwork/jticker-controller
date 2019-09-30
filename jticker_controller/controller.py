@@ -74,7 +74,7 @@ class Controller(Service):
         raise web.HTTPOk()
 
     async def _strip(self, request):
-        time_iso8601 = datetime.datetime.fromtimestamp(EPOCH_START).isoformat()
+        time_iso8601 = datetime.datetime.fromtimestamp(EPOCH_START).date().isoformat()
         coros = [c.query(f"delete where time < '{time_iso8601}'") for c in self.influx_clients]
         await asyncio.gather(*coros)
         raise web.HTTPOk()

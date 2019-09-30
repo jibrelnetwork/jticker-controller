@@ -98,6 +98,7 @@ async def client(_injector, controller):
     async def request(method, path, *, _raw=False, **json):
         url = f"http://{host}:{port}/{path}"
         async with session.request(method, url, json=json) as response:
+            assert response.status == 200
             await response.read()
             if _raw:
                 return response
@@ -126,7 +127,7 @@ class _FakeInfluxClient:
         self._closed = True
 
     async def query(self, q: str):
-        assert q == "delete where time < '2009-01-01T00:00:00'"
+        assert q == "delete where time < '2009-01-01'"
 
 
 @pytest.fixture(autouse=True)
