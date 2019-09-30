@@ -10,6 +10,7 @@ from aiokafka import AIOKafkaProducer
 from aiokafka.errors import ConnectionError as KafkaConnectionError
 from addict import Dict
 from aioinflux import InfluxDBClient
+from loguru import logger
 
 from jticker_core import inject, register, WebServer, Task
 from jticker_core.candle import EPOCH_START
@@ -44,7 +45,7 @@ class Controller(Service):
 
     def _configure_router(self):
         self.web_server.app.router.add_route("POST", "/task/add", self._add_task)
-        self.web_server.app.router.add_route("GET", "/storage/strip", self._strip)
+        self.web_server.app.router.add_route("GET", "/storage/strip", self._schedule_strip)
         self.web_server.app.router.add_route("GET", "/healthcheck", self._healthcheck)
 
     def on_init_dependencies(self):
@@ -73,10 +74,16 @@ class Controller(Service):
         )
         raise web.HTTPOk()
 
-    async def _strip(self, request):
+    async def _strip(self):
+        logger.info("strip started")
         time_iso8601 = datetime.datetime.fromtimestamp(EPOCH_START).date().isoformat()
         coros = [c.query(f"delete where time < '{time_iso8601}'") for c in self.influx_clients]
         await asyncio.gather(*coros)
+        logger.info("strip done")
+
+    async def _schedule_strip(self, request):
+        logger.info("strip scheduled")
+        self.add_future(self._strip())
         raise web.HTTPOk()
 
     async def _healthcheck(self, request):
