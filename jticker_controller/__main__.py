@@ -17,7 +17,7 @@ from .controller import Controller
 @register(singleton=True)
 def version() -> str:
     try:
-        return Path(__file__).parent.parent.joinpath("version.txt").read_text()
+        return Path(__file__).parent.parent.joinpath("version.txt").read_text().strip()
     except Exception:
         return "dev"
 
