@@ -37,6 +37,7 @@ class Controller(Service):
             ssl=bool(config.influx_ssl),
             username=config.influx_username,
             password=config.influx_password,
+            timeout=60 * 60,
         )
         self.influx_clients = [cli(host=h) for h in config.influx_host.split(",")]
         self._task_topic = config.kafka_tasks_topic
