@@ -22,5 +22,6 @@ async def test_healthcheck(client):
 
 
 @pytest.mark.asyncio
-async def test_strip(client, mocked_kafka):
+async def test_strip(client, mocked_kafka, controller):
     await client("GET", "storage/strip", _raw=True)
+    await controller._strip()
