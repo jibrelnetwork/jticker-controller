@@ -144,7 +144,7 @@ class _FakeInfluxClient:
                 ]
             }
         elif "delete" in q:
-            assert q.endswith("where time < '2009-01-01'")
+            assert q.endswith('where time < "2009-01-01"')
         else:
             raise ValueError(f"Unknown query {q!r}")
 
