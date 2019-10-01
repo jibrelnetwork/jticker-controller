@@ -9,11 +9,27 @@ from mode import Service
 from aiokafka import AIOKafkaProducer
 from aiokafka.errors import ConnectionError as KafkaConnectionError
 from addict import Dict
-from aioinflux import InfluxDBClient
+from aioinflux import InfluxDBClient, iterpoints
 from loguru import logger
+from tqdm import tqdm
 
 from jticker_core import inject, register, WebServer, Task
 from jticker_core.candle import EPOCH_START
+
+
+class LogFile:
+
+    def __init__(self, logger):
+        self.logger = logger
+
+    def write(self, s: str):
+        s = s.strip()
+        if not s:
+            return
+        self.logger.info(s)
+
+    def flush(self):
+        pass
 
 
 @register(singleton=True, name="controller")
@@ -76,10 +92,23 @@ class Controller(Service):
         raise web.HTTPOk()
 
     async def _strip(self):
+        # TODO: simplify when resolved
+        # https://github.com/influxdata/influxdb/issues/9636
         logger.info("strip started")
+        coros = [c.query("show measurements") for c in self.influx_clients]
+        results = await asyncio.gather(*coros)
+        topics = set()
+        for points in results:
+            for p in iterpoints(points):
+                topics.add(p[0])
+        total = len(topics)
+        logger.info("will strip {} topics", total)
         time_iso8601 = datetime.datetime.fromtimestamp(EPOCH_START).date().isoformat()
-        coros = [c.query(f"delete where time < '{time_iso8601}'") for c in self.influx_clients]
-        await asyncio.gather(*coros)
+        for topic in tqdm(topics, ncols=80, ascii=True, mininterval=10,
+                          maxinterval=10, file=LogFile(logger=logger)):
+            coros = [c.query(f"delete from {topic} where time < '{time_iso8601}'")
+                     for c in self.influx_clients]
+            await asyncio.gather(*coros)
         logger.info("strip done")
 
     async def _schedule_strip(self, request):

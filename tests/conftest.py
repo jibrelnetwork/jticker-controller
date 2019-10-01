@@ -128,7 +128,25 @@ class _FakeInfluxClient:
         self._closed = True
 
     async def query(self, q: str):
-        assert q == "delete where time < '2009-01-01'"
+        if q == "show measurements":
+            return {
+                "results": [
+                    {
+                        "statement_id": 0,
+                        "series": [
+                            {
+                                "name": "measurements",
+                                "columns": ["name"],
+                                "values": [["topic"]],
+                            }
+                        ]
+                    }
+                ]
+            }
+        elif "delete" in q:
+            assert q.endswith("where time < '2009-01-01'")
+        else:
+            raise ValueError(f"Unknown query {q!r}")
 
 
 @pytest.fixture(autouse=True)
