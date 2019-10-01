@@ -112,7 +112,7 @@ async def client(_injector, controller):
 
 class _FakeInfluxClient:
 
-    def __init__(self, host, port, db, unix_socket, ssl, username, password):
+    def __init__(self, host, port, db, unix_socket, ssl, username, password, timeout):
         assert host
         assert isinstance(host, str)
         assert isinstance(port, int)
@@ -121,6 +121,7 @@ class _FakeInfluxClient:
         assert isinstance(ssl, bool)
         assert isinstance(username, (type(None), str))
         assert isinstance(password, (type(None), str))
+        assert isinstance(timeout, (type(None), float, int))
         self._closed = False
 
     async def close(self):
