@@ -112,7 +112,7 @@ async def client(_injector, controller):
 
 class _FakeInfluxClient:
 
-    def __init__(self, host, port, db, unix_socket, ssl, username, password):
+    def __init__(self, host, port, db, unix_socket, ssl, username, password, timeout):
         assert host
         assert isinstance(host, str)
         assert isinstance(port, int)
@@ -121,13 +121,32 @@ class _FakeInfluxClient:
         assert isinstance(ssl, bool)
         assert isinstance(username, (type(None), str))
         assert isinstance(password, (type(None), str))
+        assert isinstance(timeout, (type(None), float, int))
         self._closed = False
 
     async def close(self):
         self._closed = True
 
     async def query(self, q: str):
-        assert q == "delete where time < '2009-01-01'"
+        if q == "show measurements":
+            return {
+                "results": [
+                    {
+                        "statement_id": 0,
+                        "series": [
+                            {
+                                "name": "measurements",
+                                "columns": ["name"],
+                                "values": [["topic"]],
+                            }
+                        ]
+                    }
+                ]
+            }
+        elif "delete" in q:
+            assert q.endswith("where time < '2009-01-01'")
+        else:
+            raise ValueError(f"Unknown query {q!r}")
 
 
 @pytest.fixture(autouse=True)
