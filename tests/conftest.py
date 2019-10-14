@@ -71,8 +71,8 @@ def _injector(unused_tcp_port):
         influx_chunk_size="",
     )
     injector.register(lambda: config, name="config")
-    injector.register(lambda: "127.0.0.1", name="host")
-    injector.register(lambda: str(unused_tcp_port), name="port")
+    injector.register(lambda: "127.0.0.1", name="web_host")
+    injector.register(lambda: str(unused_tcp_port), name="web_port")
     injector.register(lambda: "TEST_VERSION", name="version")
     return injector
 
@@ -104,8 +104,8 @@ async def client(_injector, controller):
                 return response
             else:
                 return await response.json()
-    host = _injector.get("host")
-    port = _injector.get("port")
+    host = _injector.get("web_host")
+    port = _injector.get("web_port")
     async with ClientSession() as session:
         yield request
 

@@ -1,7 +1,7 @@
 import os
 import asyncio
-import argparse
 import collections
+from argparse import ArgumentParser
 from pathlib import Path
 
 import sentry_sdk
@@ -15,27 +15,16 @@ from .controller import Controller
 
 
 @register(singleton=True)
-def version() -> str:
-    try:
-        return Path(__file__).parent.parent.joinpath("version.txt").read_text().strip()
-    except Exception:
-        return "dev"
+def name():
+    return "jticker-controller"
 
 
 @register(singleton=True)
 @inject
-def config(version: str) -> Dict:
-    parser = argparse.ArgumentParser("jticker_controller")
-    parser.add_argument("--sentry-dsn", default=None, help="Sentry DSN [default: %(default)s]")
-    parser.add_argument("--log-level", default="INFO",
-                        help="Python logging level [default: %(default)s]")
+def parser(name, base_parser):
+    parser = ArgumentParser(name, parents=[base_parser])
     parser.add_argument("--stats-log-interval", default="60",
                         help="Stats logging interval [default: %(default)s]")
-    # web
-    parser.add_argument("--web-host", default="0.0.0.0",
-                        help="Web server host [default: %(default)s]")
-    parser.add_argument("--web-port", default="8080",
-                        help="Web server port [default: %(default)s]")
     # kafka
     parser.add_argument("--kafka-bootstrap-servers", default="kafka:9092",
                         help="Comma separated kafka bootstrap servers [default: %(default)s]")
@@ -56,9 +45,7 @@ def config(version: str) -> Dict:
                         help="Influxdb unix socket [%(default)s]")
     parser.add_argument("--influx-chunk-size", default="1000",
                         help="Influx batch/chunk write size [%(default)s]")
-    args = vars(parser.parse_args())
-    env = {k.lower(): v for k, v in os.environ.items() if k.lower() in args}
-    return Dict(**collections.ChainMap(env, args))
+    return parser
 
 
 @register(singleton=True)
