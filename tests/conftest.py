@@ -38,8 +38,7 @@ class _FakeAioKafkaProducer:
             self.closed = False
 
         def append(self, key, value, timestamp):
-            if self.closed:
-                raise RuntimeError("Batch is closed, but trying to append")
+            assert not self.closed
             assert isinstance(key, bytes)
             assert isinstance(value, bytes)
             self.data.append((key, value, timestamp))
