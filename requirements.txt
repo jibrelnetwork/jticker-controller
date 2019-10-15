@@ -8,3 +8,6 @@ aiokafka == 0.5.2
 backoff == 1.8.0
 aioinflux == 0.9.0
 tqdm == 4.36.1
+# use orjson when possible
+ujson == 1.35
+mujson == 1.4
