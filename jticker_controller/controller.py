@@ -1,7 +1,6 @@
 import asyncio
 import uuid
 import datetime
-import collections
 from functools import partial
 
 import backoff
@@ -125,9 +124,7 @@ class Controller(Service):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         published_trading_pairs = {}
-        batches = collections.defaultdict(self._producer.create_batch)
         count = 0
-        batch_limit = 1000
         async for msg in ws:
             for c in json.loads(msg.data):
                 # TODO: support multiple intervals
@@ -144,22 +141,14 @@ class Controller(Service):
                         key=trading_pair_key_string,
                     )
                     published_trading_pairs[tp_key] = topic
-                batch = batches[tp_key]
-                batch.append(
-                    value=json.dumps(c).encode("utf-8"),
-                    key=str(c["timestamp"]).encode("utf-8"),
-                    timestamp=None,
+                topic = published_trading_pairs[tp_key]
+                await self._producer.send(
+                    topic,
+                    key=str(c["timestamp"]),
+                    value=json.dumps(c),
                 )
-                if batch.record_count() >= batch_limit:
-                    batches.pop(tp_key)
-                    batch.close()
-                    topic = published_trading_pairs[tp_key]
-                    await self._producer.send_batch(batch, topic, partition=0)
                 count += 1
-        logger.info("finalizing partial batches...")
-        for tp_key, batch in batches.items():
-            topic = published_trading_pairs[tp_key]
-            batch.close()
-            await self._producer.send_batch(batch, topic, partition=0)
+        logger.info("flushing...")
+        await self._producer.flush()
         logger.info("{} candles added to kafka", count)
         return ws
