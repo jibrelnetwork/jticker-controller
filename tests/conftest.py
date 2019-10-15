@@ -31,6 +31,25 @@ class _FakeKafka:
 
 class _FakeAioKafkaProducer:
 
+    class Batch:
+
+        def __init__(self):
+            self.data = []
+            self.closed = False
+
+        def append(self, key, value, timestamp):
+            if self.closed:
+                raise RuntimeError("Batch is closed, but trying to append")
+            assert isinstance(key, bytes)
+            assert isinstance(value, bytes)
+            self.data.append((key, value, timestamp))
+
+        def record_count(self):
+            return len(self.data)
+
+        def close(self):
+            self.closed = True
+
     def __init__(self, _fake_kafka, loop, bootstrap_servers, **_):
         self._fake_kafka = _fake_kafka
 
@@ -45,6 +64,16 @@ class _FakeAioKafkaProducer:
         assert isinstance(value, str)
         assert isinstance(key, str)
         self._fake_kafka.put(topic, value)
+
+    def create_batch(self):
+        return self.Batch()
+
+    async def send_batch(self, batch, topic, partition):
+        assert isinstance(partition, int)
+        assert isinstance(batch, self.Batch)
+        assert batch.closed
+        for k, v, t in batch.data:
+            await self.send_and_wait(topic, value=v.decode(), key=k.decode())
 
 
 @pytest.fixture(autouse=True)
@@ -94,9 +123,16 @@ async def controller(_web_server):
 
 
 @pytest.fixture
-async def client(_injector, controller):
+def base_url(_injector):
+    host = _injector.get("web_host")
+    port = _injector.get("web_port")
+    return f"http://{host}:{port}"
+
+
+@pytest.fixture
+async def client(base_url, controller):
     async def request(method, path, *, _raw=False, **json):
-        url = f"http://{host}:{port}/{path}"
+        url = f"{base_url}/{path}"
         async with session.request(method, url, json=json) as response:
             assert response.status == 200
             await response.read()
@@ -104,8 +140,6 @@ async def client(_injector, controller):
                 return response
             else:
                 return await response.json()
-    host = _injector.get("web_host")
-    port = _injector.get("web_port")
     async with ClientSession() as session:
         yield request
 
