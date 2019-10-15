@@ -4,6 +4,7 @@ import datetime
 from functools import partial
 
 import backoff
+import mujson as json
 from aiohttp import web
 from mode import Service
 from aiokafka import AIOKafkaProducer
@@ -13,8 +14,7 @@ from aioinflux import InfluxDBClient, iterpoints
 from loguru import logger
 from tqdm import tqdm
 
-from jticker_core import inject, register, WebServer, Task
-from jticker_core.candle import EPOCH_START
+from jticker_core import inject, register, WebServer, Task, EPOCH_START, TradingPair, Interval
 
 
 class LogFile:
@@ -64,6 +64,7 @@ class Controller(Service):
         self.web_server.app.router.add_route("POST", "/task/add", self._add_task)
         self.web_server.app.router.add_route("GET", "/storage/strip", self._schedule_strip)
         self.web_server.app.router.add_route("GET", "/healthcheck", self._healthcheck)
+        self.web_server.app.router.add_route("GET", "/ws/add_candles", self.add_candles_ws_handler)
 
     def on_init_dependencies(self):
         return [
@@ -118,3 +119,36 @@ class Controller(Service):
 
     async def _healthcheck(self, request):
         return web.json_response(dict(healthy=True, version=self._version))
+
+    async def add_candles_ws_handler(self, request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        published_trading_pairs = {}
+        count = 0
+        async for msg in ws:
+            for c in json.loads(msg.data):
+                # TODO: support multiple intervals
+                if c["interval"] != Interval.MIN_1.value:
+                    continue
+                tp_key = exchange, symbol = c["exchange"], c["symbol"]
+                if tp_key not in published_trading_pairs:
+                    trading_pair_key_string = f"{exchange}:{symbol}"
+                    topic = f"{exchange}_{symbol}_{c['interval']}"
+                    trading_pair = TradingPair(symbol, exchange, topic=topic)
+                    await self._producer.send_and_wait(
+                        "assets_metadata",
+                        value=trading_pair.as_json(),
+                        key=trading_pair_key_string,
+                    )
+                    published_trading_pairs[tp_key] = topic
+                topic = published_trading_pairs[tp_key]
+                await self._producer.send(
+                    topic,
+                    key=str(c["timestamp"]),
+                    value=json.dumps(c),
+                )
+                count += 1
+        logger.info("flushing...")
+        await self._producer.flush()
+        logger.info("{} candles added to kafka", count)
+        return ws
