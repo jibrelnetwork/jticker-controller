@@ -159,6 +159,7 @@ class Controller(Service):
         logger.info("finalizing partial batches...")
         for tp_key, batch in batches.items():
             topic = published_trading_pairs[tp_key]
+            batch.close()
             await self._producer.send_batch(batch, topic, partition=0)
         logger.info("{} candles added to kafka", count)
         return ws
