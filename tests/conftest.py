@@ -1,5 +1,6 @@
 import collections
 import re
+import asyncio
 from functools import partial
 
 import pytest
@@ -51,6 +52,7 @@ class _FakeAioKafkaProducer:
 
     def __init__(self, _fake_kafka, loop, bootstrap_servers, **_):
         self._fake_kafka = _fake_kafka
+        self.flush_called = asyncio.Future()
 
     async def start(self):
         pass
@@ -74,6 +76,11 @@ class _FakeAioKafkaProducer:
         for k, v, t in batch.data:
             await self.send_and_wait(topic, value=v.decode(), key=k.decode())
 
+    async def send(self, topic, value=None, key=None):
+        return await self.send_and_wait(topic, value, key)
+
+    async def flush(self):
+        self.flush_called.set_result(True)
 
 @pytest.fixture(autouse=True)
 def mocked_kafka(monkeypatch):

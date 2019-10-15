@@ -48,3 +48,4 @@ async def test_add_candles(base_url, mocked_kafka, controller):
             await ws.send_json(data)
     assert len(mocked_kafka.data) == 2
     assert set(map(len, mocked_kafka.data.values())) == {1, 1001}
+    await controller._producer.flush_called
