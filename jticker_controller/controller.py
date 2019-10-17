@@ -14,7 +14,7 @@ from aioinflux import InfluxDBClient, iterpoints
 from loguru import logger
 from tqdm import tqdm
 
-from jticker_core import inject, register, WebServer, Task, EPOCH_START, TradingPair, Interval
+from jticker_core import inject, register, WebServer, Task, EPOCH_START, TradingPair, Interval, Rate
 
 
 class LogFile:
@@ -125,6 +125,8 @@ class Controller(Service):
         await ws.prepare(request)
         published_trading_pairs = {}
         count = 0
+        logger.info("add candles ws opened")
+        rate = Rate(log_period=15, log_template="{:.3f} candles/s")
         async for msg in ws:
             for c in json.loads(msg.data):
                 # TODO: support multiple intervals
@@ -135,7 +137,7 @@ class Controller(Service):
                     trading_pair_key_string = f"{exchange}:{symbol}"
                     topic = f"{exchange}_{symbol}_{c['interval']}"
                     trading_pair = TradingPair(symbol, exchange, topic=topic)
-                    await self._producer.send_and_wait(
+                    await self._producer.send(
                         "assets_metadata",
                         value=trading_pair.as_json(),
                         key=trading_pair_key_string,
@@ -148,6 +150,7 @@ class Controller(Service):
                     value=json.dumps(c),
                 )
                 count += 1
+                rate.inc()
         logger.info("flushing...")
         await self._producer.flush()
         logger.info("{} candles added to kafka", count)
