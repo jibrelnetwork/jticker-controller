@@ -82,6 +82,7 @@ class _FakeAioKafkaProducer:
     async def flush(self):
         self.flush_called.set_result(True)
 
+
 @pytest.fixture(autouse=True)
 def mocked_kafka(monkeypatch):
     fake_kafka = _FakeKafka()

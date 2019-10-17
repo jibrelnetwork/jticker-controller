@@ -1,8 +1,5 @@
-import os
 import asyncio
-import collections
 from argparse import ArgumentParser
-from pathlib import Path
 
 import sentry_sdk
 import mode
