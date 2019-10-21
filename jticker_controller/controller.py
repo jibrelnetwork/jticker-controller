@@ -151,6 +151,7 @@ class Controller(Service):
             await self._batches_queue.put((topic, batch))
         logger.info("awaiting queued batches stored...")
         await self._batches_queue.join()
+        await self._producer.flush()
         logger.info("{} candles added to kafka", count)
 
     async def add_candles_ws_handler(self, request):
