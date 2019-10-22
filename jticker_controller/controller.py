@@ -1,6 +1,8 @@
 import asyncio
 import uuid
 import datetime
+import collections
+import random
 from functools import partial
 
 import backoff
@@ -56,6 +58,7 @@ class Controller(Service):
             timeout=60 * 60,
         )
         self.influx_clients = [cli(host=h) for h in config.influx_host.split(",")]
+        self._batches_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
         self._task_topic = config.kafka_tasks_topic
         self._version = version
         self._configure_router()
@@ -77,6 +80,7 @@ class Controller(Service):
         max_time=120)
     async def on_start(self):
         await self._producer.start()
+        self.add_future(self._batch_writer())
 
     async def on_stop(self):
         await self._producer.stop()
@@ -120,13 +124,44 @@ class Controller(Service):
     async def _healthcheck(self, request):
         return web.json_response(dict(healthy=True, version=self._version))
 
+    async def _batch_writer(self):
+        rate = Rate(log_period=15, log_template="outgoing rate: {:.3f} candles/s")
+        while True:
+            topic, candles = await self._batches_queue.get()
+            partitions = await self._producer.partitions_for(topic)
+            batch = self._producer.create_batch()
+            for c in candles:
+                meta = batch.append(
+                    key=str(c["timestamp"]).encode("utf-8"),
+                    value=json.dumps(c).encode("utf-8"),
+                    timestamp=None,
+                )
+                if meta is None:
+                    partition = random.choice(tuple(partitions))
+                    await self._producer.send_batch(batch, topic, partition=partition)
+                    batch = self._producer.create_batch()
+                rate.inc()
+            partition = random.choice(tuple(partitions))
+            await self._producer.send_batch(batch, topic, partition=partition)
+            self._batches_queue.task_done()
+
+    async def _finalize_batches(self, batches, count):
+        logger.info("enque partial batches...")
+        for topic, batch in batches.items():
+            await self._batches_queue.put((topic, batch))
+        logger.info("awaiting queued batches stored...")
+        await self._batches_queue.join()
+        await self._producer.flush()
+        logger.info("{} candles added to kafka", count)
+
     async def add_candles_ws_handler(self, request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         published_trading_pairs = {}
         count = 0
         logger.info("add candles ws opened")
-        rate = Rate(log_period=15, log_template="{:.3f} candles/s")
+        rate = Rate(log_period=15, log_template="incoming rate: {:.3f} candles/s")
+        batches = collections.defaultdict(list)
         async for msg in ws:
             for c in json.loads(msg.data):
                 # TODO: support multiple intervals
@@ -144,14 +179,14 @@ class Controller(Service):
                     )
                     published_trading_pairs[tp_key] = topic
                 topic = published_trading_pairs[tp_key]
-                await self._producer.send(
-                    topic,
-                    key=str(c["timestamp"]),
-                    value=json.dumps(c),
-                )
+                batch = batches[topic]
+                batch.append(c)
+                if len(batch) >= 10_000:
+                    batches.pop(topic)
+                    await self._batches_queue.put((topic, batch))
                 count += 1
                 rate.inc()
-        logger.info("flushing...")
-        await self._producer.flush()
-        logger.info("{} candles added to kafka", count)
+        # can't do "await" things here, since cancelation
+        # https://docs.aiohttp.org/en/stable/web_advanced.html#web-handler-cancellation
+        self.add_future(self._finalize_batches(batches, count))
         return ws
