@@ -72,7 +72,6 @@ class _FakeAioKafkaProducer:
     async def send_batch(self, batch, topic, partition):
         assert isinstance(partition, int)
         assert isinstance(batch, self.Batch)
-        assert batch.closed
         for k, v, t in batch.data:
             await self.send_and_wait(topic, value=v.decode(), key=k.decode())
 
@@ -81,6 +80,11 @@ class _FakeAioKafkaProducer:
 
     async def flush(self):
         self.flush_called.set_result(True)
+
+    async def partitions_for(self, topic):
+        assert isinstance(topic, str)
+        return [0]
+
 
 @pytest.fixture(autouse=True)
 def mocked_kafka(monkeypatch):
