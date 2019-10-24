@@ -108,10 +108,9 @@ class Controller(Service):
                 topics.add(p[0])
         total = len(topics)
         logger.info("will strip {} topics", total)
-        time_iso8601 = datetime.datetime.fromtimestamp(EPOCH_START).date().isoformat()
         for topic in tqdm(topics, ncols=80, ascii=True, mininterval=10,
                           maxinterval=10, file=LogFile(logger=logger)):
-            coros = [c.query(f"""delete from "{topic}" where time < '{time_iso8601}'""")
+            coros = [c.query(f"""delete from "{topic}" where time < {int(EPOCH_START * 10 ** 9)}""")
                      for c in self.influx_clients]
             await asyncio.gather(*coros)
         logger.info("strip done")
