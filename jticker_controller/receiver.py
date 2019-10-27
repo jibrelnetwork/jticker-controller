@@ -3,7 +3,6 @@ import argparse
 import json
 import pickle
 import zipfile
-from pathlib import Path
 
 from aiohttp import ClientSession
 
