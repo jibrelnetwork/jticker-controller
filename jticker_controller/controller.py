@@ -73,6 +73,7 @@ class Controller(Service):
         self.web_server.app.router.add_route("GET", "/storage/strip", self._schedule_strip)
         self.web_server.app.router.add_route("GET", "/healthcheck", self._healthcheck)
         self.web_server.app.router.add_route("GET", "/ws/add_candles", self.add_candles_ws_handler)
+        self.web_server.app.router.add_route("GET", "/list_topics", self.list_topics)
         self.web_server.app.router.add_route("GET", "/ws/get_candles", self.get_candles_ws_handler)
 
     def on_init_dependencies(self):
@@ -230,30 +231,30 @@ class Controller(Service):
                         break
         return topics
 
+    async def list_topics(self, request):
+        topics = await self._read_kafka_asset_topics()
+        logger.info("found {} topics", len(topics))
+        return web.json_response(topics)
+
     async def get_candles_ws_handler(self, request):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
-        topics = await self._read_kafka_asset_topics()
-        logger.info("found {} topics", len(topics))
-        rate = Rate(log_period=15, log_template="dump candles rate: {:.3f} candles/s")
         chunk = []
-        for topic in tqdm(topics, ncols=80, ascii=True, mininterval=10,
-                          maxinterval=10, file=TqdmLogFile(logger=logger)):
-            c = AIOKafkaConsumer(
-                topic,
-                loop=asyncio.get_running_loop(),
-                bootstrap_servers=self._bootstrap_servers,
-                auto_offset_reset='earliest',
-            )
-            async with AsyncResourceContext(c) as consumer:
-                partition = TopicPartition(topic, 0)
-                last_known_offset = (await consumer.end_offsets([partition]))[partition]
-                current_position = await consumer.position(partition)
-                if current_position >= last_known_offset:
-                    continue
+        topic = await ws.receive_json()
+        logger.info("dump topic {}", topic)
+        c = AIOKafkaConsumer(
+            topic,
+            loop=asyncio.get_running_loop(),
+            bootstrap_servers=self._bootstrap_servers,
+            auto_offset_reset='earliest',
+        )
+        async with AsyncResourceContext(c) as consumer:
+            partition = TopicPartition(topic, 0)
+            last_known_offset = (await consumer.end_offsets([partition]))[partition]
+            current_position = await consumer.position(partition)
+            if current_position < last_known_offset:
                 async for msg in consumer:
                     chunk.append(msg)
-                    rate.inc()
                     if len(chunk) >= 100:
                         await ws.send_bytes(pickle.dumps(chunk))
                         chunk = []
@@ -262,4 +263,6 @@ class Controller(Service):
                         break
                 if chunk:
                     await ws.send_bytes(pickle.dumps(chunk))
+        # eof token
+        await ws.send_bytes(b"")
         return ws

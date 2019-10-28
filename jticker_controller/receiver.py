@@ -5,8 +5,25 @@ import pickle
 import zipfile
 
 from aiohttp import ClientSession
+from loguru import logger
+from tqdm import tqdm
 
-from jticker_core import Rate
+from jticker_core import Rate, TqdmLogFile
+
+
+async def get_topic_data(session, base_url, topic):
+    while True:
+        records = []
+        async with session.ws_connect(f"{base_url}/ws/get_candles") as ws:
+            await ws.send_json(topic)
+            async for msg in ws:
+                if not msg.data:
+                    return records
+                for record in pickle.loads(msg.data):
+                    d = record._asdict()
+                    d["key"] = d["key"].decode()
+                    d["value"] = json.loads(d["value"])
+                    records.append(d)
 
 
 async def main():
@@ -15,29 +32,23 @@ async def main():
     parser.add_argument("--port", default="8080")
     parser.add_argument("--storage-file", default="storage.zip")
     ns = parser.parse_args()
+    base_url = f"http://{ns.host}:{ns.port}"
     rate = Rate(log_period=15, log_template="receive candles rate: {:.3f} candles/s")
-    with zipfile.ZipFile(ns.storage_file, mode="w", compression=zipfile.ZIP_DEFLATED) as zfile:
-        last_topic = fd = None
+    with zipfile.ZipFile(ns.storage_file, mode="a", compression=zipfile.ZIP_DEFLATED) as zfile:
         async with ClientSession() as session:
-            async with session.ws_connect(f"http://{ns.host}:{ns.port}/ws/get_candles") as ws:
-                async for msg in ws:
-                    chunk = pickle.loads(msg.data)
-                    topic = chunk[0].topic
-                    if topic != last_topic:
-                        if fd:
-                            fd.close()
-                        fd = zfile.open(f"{topic}.jsonl", mode="w")
-                        last_topic = topic
-                    for record in chunk:
-                        d = record._asdict()
-                        d["key"] = d["key"].decode()
-                        d["value"] = json.loads(d["value"])
-                        line = json.dumps(d) + "\n"
-                        fd.write(line.encode("utf-8"))
+            async with session.get(f"{base_url}/list_topics") as response:
+                topics = await response.json()
+            names = {n[:-len(".jsonl")] for n in zfile.namelist() if n.endswith(".jsonl")}
+            for topic in tqdm(sorted(topics), ncols=80, ascii=True, mininterval=10,
+                              maxinterval=10, file=TqdmLogFile(logger=logger)):
+                if topic in names:
+                    continue
+                data = await get_topic_data(session, base_url, topic)
+                with zfile.open(f"{topic}.jsonl", "w") as f:
+                    for record in data:
+                        line = json.dumps(record) + "\n"
+                        f.write(line.encode())
                         rate.inc()
-                    fd.flush()
-                if fd:
-                    fd.close()
 
 
 if __name__ == "__main__":
