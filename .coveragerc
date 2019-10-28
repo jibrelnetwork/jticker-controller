@@ -2,3 +2,4 @@
 show_missing = True
 omit =
     jticker_controller/__main__.py
+    jticker_controller/receiver.py

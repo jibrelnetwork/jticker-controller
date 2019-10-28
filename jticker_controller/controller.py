@@ -2,35 +2,39 @@ import asyncio
 import uuid
 import collections
 import random
+import pickle
 from functools import partial
 
 import backoff
 import mujson as json
 from aiohttp import web
 from mode import Service
-from aiokafka import AIOKafkaProducer
+from aiokafka import AIOKafkaProducer, AIOKafkaConsumer, TopicPartition
 from aiokafka.errors import ConnectionError as KafkaConnectionError
 from addict import Dict
 from aioinflux import InfluxDBClient, iterpoints
 from loguru import logger
 from tqdm import tqdm
 
-from jticker_core import inject, register, WebServer, Task, EPOCH_START, TradingPair, Interval, Rate
+from jticker_core import (inject, register, WebServer, Task, EPOCH_START, TradingPair, Interval,
+                          Rate, TqdmLogFile)
 
 
-class LogFile:
+class AsyncResourceContext:
 
-    def __init__(self, logger):
-        self.logger = logger
+    def __init__(self, resource, *, enter_name="start", exit_name="stop"):
+        self.resource = resource
+        self.enter_name = enter_name
+        self.exit_name = exit_name
 
-    def write(self, s: str):
-        s = s.strip()
-        if not s:
-            return
-        self.logger.info(s)
+    async def __aenter__(self):
+        if self.enter_name:
+            await getattr(self.resource, self.enter_name)()
+        return self.resource
 
-    def flush(self):
-        pass
+    async def __aexit__(self, *exc_info):
+        if self.exit_name:
+            return await getattr(self.resource, self.exit_name)()
 
 
 @register(singleton=True, name="controller")
@@ -40,9 +44,10 @@ class Controller(Service):
     def __init__(self, web_server: WebServer, config: Dict, version: str):
         super().__init__()
         self.web_server = web_server
+        self._bootstrap_servers = config.kafka_bootstrap_servers.split(",")
         self._producer = AIOKafkaProducer(
             loop=asyncio.get_event_loop(),
-            bootstrap_servers=config.kafka_bootstrap_servers.split(","),
+            bootstrap_servers=self._bootstrap_servers,
             key_serializer=lambda s: s.encode("utf-8"),
             value_serializer=lambda s: s.encode("utf-8"),
         )
@@ -59,6 +64,7 @@ class Controller(Service):
         self.influx_clients = [cli(host=h) for h in config.influx_host.split(",")]
         self._batches_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
         self._task_topic = config.kafka_tasks_topic
+        self._assets_metadata_topic = config.kafka_trading_pairs_topic
         self._version = version
         self._configure_router()
 
@@ -67,6 +73,7 @@ class Controller(Service):
         self.web_server.app.router.add_route("GET", "/storage/strip", self._schedule_strip)
         self.web_server.app.router.add_route("GET", "/healthcheck", self._healthcheck)
         self.web_server.app.router.add_route("GET", "/ws/add_candles", self.add_candles_ws_handler)
+        self.web_server.app.router.add_route("GET", "/ws/get_candles", self.get_candles_ws_handler)
 
     def on_init_dependencies(self):
         return [
@@ -108,7 +115,7 @@ class Controller(Service):
         total = len(topics)
         logger.info("will strip {} topics", total)
         for topic in tqdm(topics, ncols=80, ascii=True, mininterval=10,
-                          maxinterval=10, file=LogFile(logger=logger)):
+                          maxinterval=10, file=TqdmLogFile(logger=logger)):
             coros = [c.query(f"""delete from "{topic}" where time < {int(EPOCH_START * 10 ** 9)}""")
                      for c in self.influx_clients]
             await asyncio.gather(*coros)
@@ -187,4 +194,72 @@ class Controller(Service):
         # can't do "await" things here, since cancelation
         # https://docs.aiohttp.org/en/stable/web_advanced.html#web-handler-cancellation
         self.add_future(self._finalize_batches(batches, count))
+        return ws
+
+    async def _read_kafka_asset_topics(self):
+        topics = []
+        c = AIOKafkaConsumer(
+            loop=asyncio.get_running_loop(),
+            bootstrap_servers=self._bootstrap_servers,
+            auto_offset_reset='earliest',
+        )
+        async with AsyncResourceContext(c) as consumer:
+            logger.info("start loading assets...")
+            partition = TopicPartition(self._assets_metadata_topic, 0)
+            last_known_offset = (await consumer.end_offsets([partition]))[partition]
+            logger.debug("last known assets metadata offset: {}", last_known_offset)
+            if last_known_offset <= 0:
+                logger.warning("no assets in kafka")
+                return topics
+            consumer.assign([partition])
+            await consumer.seek_to_beginning(partition)
+            async for msg in consumer:
+                try:
+                    data = json.loads(msg.value)
+                except json.JSONDecodeError:
+                    logger.error("can not decode trading pair from {!r}", msg.value)
+                else:
+                    topic = data.get("topic") or data.get("kafka_topic")
+                    if topic is None:
+                        logger.warning("can't resolve topic from {}", data)
+                    else:
+                        topics.append(topic)
+                finally:
+                    current_position = await consumer.position(partition)
+                    if current_position >= last_known_offset:
+                        break
+        return topics
+
+    async def get_candles_ws_handler(self, request):
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+        topics = await self._read_kafka_asset_topics()
+        logger.info("found {} topics", len(topics))
+        rate = Rate(log_period=15, log_template="dump candles rate: {:.3f} candles/s")
+        chunk = []
+        for topic in tqdm(topics, ncols=80, ascii=True, mininterval=10,
+                          maxinterval=10, file=TqdmLogFile(logger=logger)):
+            c = AIOKafkaConsumer(
+                topic,
+                loop=asyncio.get_running_loop(),
+                bootstrap_servers=self._bootstrap_servers,
+                auto_offset_reset='earliest',
+            )
+            async with AsyncResourceContext(c) as consumer:
+                partition = TopicPartition(topic, 0)
+                last_known_offset = (await consumer.end_offsets([partition]))[partition]
+                current_position = await consumer.position(partition)
+                if current_position >= last_known_offset:
+                    continue
+                async for msg in consumer:
+                    chunk.append(msg)
+                    rate.inc()
+                    if len(chunk) >= 100:
+                        await ws.send_bytes(pickle.dumps(chunk))
+                        chunk = []
+                    current_position = await consumer.position(partition)
+                    if current_position >= last_known_offset:
+                        break
+                if chunk:
+                    await ws.send_bytes(pickle.dumps(chunk))
         return ws

@@ -27,6 +27,8 @@ def parser(name, base_parser):
                         help="Comma separated kafka bootstrap servers [default: %(default)s]")
     parser.add_argument("--kafka-tasks-topic", default="grabber_tasks",
                         help="Tasks kafka topic [default: %(default)s]")
+    parser.add_argument("--kafka-trading-pairs-topic", default="assets_metadata",
+                        help="Trading pairs kafka topic [default: %(default)s]")
     # influx
     parser.add_argument("--influx-host", default="influxdb",
                         help="Influxdb hosts (comma separated) [default: %(default)s]")
