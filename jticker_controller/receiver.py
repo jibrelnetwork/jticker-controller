@@ -3,7 +3,9 @@ import argparse
 import json
 import pickle
 import zipfile
+import socket
 
+import backoff
 from aiohttp import ClientSession
 from loguru import logger
 from tqdm import tqdm
@@ -11,6 +13,11 @@ from tqdm import tqdm
 from jticker_core import Rate, TqdmLogFile
 
 
+@backoff.on_exception(
+    backoff.constant,
+    (socket.gaierror,),
+    jitter=None,
+    interval=1)
 async def get_topic_data(session, base_url, topic):
     while True:
         rate = Rate(log_period=15, log_template=topic + " candles rate: {:.3f} candles/s")
