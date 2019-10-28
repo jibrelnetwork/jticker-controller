@@ -13,6 +13,7 @@ from jticker_core import Rate, TqdmLogFile
 
 async def get_topic_data(session, base_url, topic):
     while True:
+        rate = Rate(log_period=15, log_template=topic + " candles rate: {:.3f} candles/s")
         records = []
         async with session.ws_connect(f"{base_url}/ws/get_candles") as ws:
             await ws.send_json(topic)
@@ -24,6 +25,7 @@ async def get_topic_data(session, base_url, topic):
                     d["key"] = d["key"].decode()
                     d["value"] = json.loads(d["value"])
                     records.append(d)
+                    rate.inc()
 
 
 async def main():
@@ -33,7 +35,7 @@ async def main():
     parser.add_argument("--storage-file", default="storage.zip")
     ns = parser.parse_args()
     base_url = f"http://{ns.host}:{ns.port}"
-    rate = Rate(log_period=15, log_template="receive candles rate: {:.3f} candles/s")
+    rate = Rate(log_period=15, log_template="global candles rate: {:.3f} candles/s")
     with zipfile.ZipFile(ns.storage_file, mode="a", compression=zipfile.ZIP_DEFLATED) as zfile:
         async with ClientSession() as session:
             async with session.get(f"{base_url}/list_topics") as response:
