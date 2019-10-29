@@ -9,7 +9,7 @@ from aiohttp import ClientSession, ClientConnectionError
 from loguru import logger
 from tqdm import tqdm
 
-from jticker_core import Rate, TqdmLogFile
+from jticker_core import Rate, TqdmLogFile, normalize_kafka_topic
 
 
 @backoff.on_exception(
@@ -34,6 +34,9 @@ async def get_topic_data(session, base_url, topic):
                     rate.inc()
 
 
+GRABBED_HISTORICAL_EXCHANGES = {"binance", "bitfinex", "hitbtc"}
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="localhost")
@@ -45,13 +48,16 @@ async def main():
     with zipfile.ZipFile(ns.storage_file, mode="a", compression=zipfile.ZIP_DEFLATED) as zfile:
         async with ClientSession() as session:
             async with session.get(f"{base_url}/list_topics") as response:
-                topics = await response.json()
+                topics = set(map(normalize_kafka_topic, await response.json()))
             names = {n[:-len(".jsonl")] for n in zfile.namelist() if n.endswith(".jsonl")}
+            topics -= names
             for topic in tqdm(sorted(topics), ncols=80, ascii=True, mininterval=10,
                               maxinterval=10, file=TqdmLogFile(logger=logger)):
-                if topic in names:
+                if any(topic.startswith(prefix) for prefix in GRABBED_HISTORICAL_EXCHANGES):
                     continue
                 data = await get_topic_data(session, base_url, topic)
+                if not data:
+                    continue
                 with zfile.open(f"{topic}.jsonl", "w") as f:
                     for record in data:
                         line = json.dumps(record) + "\n"

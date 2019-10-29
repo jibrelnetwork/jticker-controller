@@ -17,7 +17,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from jticker_core import (inject, register, WebServer, Task, EPOCH_START, TradingPair, Interval,
-                          Rate, TqdmLogFile)
+                          Rate, TqdmLogFile, normalize_kafka_topic)
 
 
 class AsyncResourceContext:
@@ -240,7 +240,7 @@ class Controller(Service):
         ws = web.WebSocketResponse()
         await ws.prepare(request)
         chunk = []
-        topic = await ws.receive_json()
+        topic = normalize_kafka_topic(await ws.receive_json())
         logger.info("dump topic {}", topic)
         c = AIOKafkaConsumer(
             topic,
