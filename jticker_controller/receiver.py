@@ -34,6 +34,9 @@ async def get_topic_data(session, base_url, topic):
                     rate.inc()
 
 
+GRABBED_HISTORICAL_EXCHANGES = {"binance", "bitfinex", "hitbtc"}
+
+
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="localhost")
@@ -50,7 +53,11 @@ async def main():
             topics -= names
             for topic in tqdm(sorted(topics), ncols=80, ascii=True, mininterval=10,
                               maxinterval=10, file=TqdmLogFile(logger=logger)):
+                if any(topic.startswith(prefix) for prefix in GRABBED_HISTORICAL_EXCHANGES):
+                    continue
                 data = await get_topic_data(session, base_url, topic)
+                if not data:
+                    continue
                 with zfile.open(f"{topic}.jsonl", "w") as f:
                     for record in data:
                         line = json.dumps(record) + "\n"
