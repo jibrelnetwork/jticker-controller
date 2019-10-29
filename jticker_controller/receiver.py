@@ -3,10 +3,9 @@ import argparse
 import json
 import pickle
 import zipfile
-import socket
 
 import backoff
-from aiohttp import ClientSession
+from aiohttp import ClientSession, ClientConnectionError
 from loguru import logger
 from tqdm import tqdm
 
@@ -15,7 +14,7 @@ from jticker_core import Rate, TqdmLogFile
 
 @backoff.on_exception(
     backoff.constant,
-    (socket.gaierror,),
+    (ClientConnectionError,),
     jitter=None,
     interval=1)
 async def get_topic_data(session, base_url, topic):
