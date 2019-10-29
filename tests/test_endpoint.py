@@ -68,11 +68,16 @@ async def test_get_candles(base_url, mocked_kafka, controller):
     mocked_kafka.put("assets_metadata", TradingPair(symbol=c.symbol, exchange=c.exchange).as_json())
     mocked_kafka.put("exchange_AB_60", c.as_json())
     async with ClientSession() as session:
+        async with session.get(f"{base_url}/list_topics") as response:
+            topics = await response.json()
+            assert topics == ["exchange_AB_60"]
         async with session.ws_connect(f"{base_url}/ws/get_candles") as ws:
             async with timeout(1):
+                await ws.send_json("exchange_AB_60")
                 msgs = []
                 async for msg in ws:
                     msgs.append(msg)
-                assert len(msgs) == 1
+                assert len(msgs) == 2
                 data = pickle.loads(msgs[0].data)
                 assert c == Candle.from_json(data[0].value)
+                assert msgs[1].data == b""
