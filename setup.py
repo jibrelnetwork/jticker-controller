@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def read_requirements(name: str):
-    p = Path(name).parent.joinpath(name)
+    p = Path(__file__).parent.joinpath(name)
     reqs = [line for line in p.read_text().splitlines() if line]
     return reqs
 
