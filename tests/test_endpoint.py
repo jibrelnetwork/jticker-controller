@@ -1,8 +1,10 @@
 import pytest
+import pickle
 
 from aiohttp import ClientSession
+from async_timeout import timeout
 
-from jticker_core import Task, EPOCH_START, Candle, Interval
+from jticker_core import Task, EPOCH_START, Candle, Interval, TradingPair
 
 
 @pytest.mark.asyncio
@@ -49,3 +51,33 @@ async def test_add_candles(base_url, mocked_kafka, controller):
     assert len(mocked_kafka.data) == 2
     assert set(map(len, mocked_kafka.data.values())) == {1, 1001}
     await controller._producer.flush_called
+
+
+@pytest.mark.asyncio
+async def test_get_candles(base_url, mocked_kafka, controller):
+    c = Candle(
+        exchange="exchange",
+        symbol="AB",
+        interval=Interval.MIN_1,
+        open=1,
+        high=2,
+        low=0,
+        close=1,
+        timestamp=EPOCH_START + 1,
+    )
+    mocked_kafka.put("assets_metadata", TradingPair(symbol=c.symbol, exchange=c.exchange).as_json())
+    mocked_kafka.put("exchange_AB_60", c.as_json())
+    async with ClientSession() as session:
+        async with session.get(f"{base_url}/list_topics") as response:
+            topics = await response.json()
+            assert topics == ["exchange_AB_60"]
+        async with session.ws_connect(f"{base_url}/ws/get_candles") as ws:
+            async with timeout(1):
+                await ws.send_json("exchange_AB_60")
+                msgs = []
+                async for msg in ws:
+                    msgs.append(msg)
+                assert len(msgs) == 2
+                data = pickle.loads(msgs[0].data)
+                assert c == Candle.from_json(data[0].value)
+                assert msgs[1].data == b""

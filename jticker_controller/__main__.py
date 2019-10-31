@@ -22,11 +22,17 @@ def parser(name, base_parser):
     parser = ArgumentParser(name, parents=[base_parser])
     parser.add_argument("--stats-log-interval", default="60",
                         help="Stats logging interval [default: %(default)s]")
+    parser.add_argument("--add-candles-batch-size", default="1000",
+                        help="Add candles batch size [default: %(default)s]")
+    parser.add_argument("--add-candles-batch-timeout", default="600",
+                        help="Add candles batch timeout [default: %(default)s]")
     # kafka
     parser.add_argument("--kafka-bootstrap-servers", default="kafka:9092",
                         help="Comma separated kafka bootstrap servers [default: %(default)s]")
     parser.add_argument("--kafka-tasks-topic", default="grabber_tasks",
                         help="Tasks kafka topic [default: %(default)s]")
+    parser.add_argument("--kafka-trading-pairs-topic", default="assets_metadata",
+                        help="Trading pairs kafka topic [default: %(default)s]")
     # influx
     parser.add_argument("--influx-host", default="influxdb",
                         help="Influxdb hosts (comma separated) [default: %(default)s]")
