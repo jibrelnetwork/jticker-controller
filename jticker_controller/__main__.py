@@ -24,6 +24,8 @@ def parser(name, base_parser):
                         help="Stats logging interval [default: %(default)s]")
     parser.add_argument("--add-candles-batch-size", default="1000",
                         help="Add candles batch size [default: %(default)s]")
+    parser.add_argument("--add-candles-batch-timeout", default="600",
+                        help="Add candles batch timeout [default: %(default)s]")
     # kafka
     parser.add_argument("--kafka-bootstrap-servers", default="kafka:9092",
                         help="Comma separated kafka bootstrap servers [default: %(default)s]")
