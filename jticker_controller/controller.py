@@ -65,6 +65,7 @@ class Controller(Service):
         self._batches_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
         self._task_topic = config.kafka_tasks_topic
         self._assets_metadata_topic = config.kafka_trading_pairs_topic
+        self._add_candles_batch_size = int(config.add_candles_batch_size)
         self._version = version
         self._configure_router()
 
@@ -187,7 +188,7 @@ class Controller(Service):
                 topic = published_trading_pairs[tp_key]
                 batch = batches[topic]
                 batch.append(c)
-                if len(batch) >= 10_000:
+                if len(batch) >= self._add_candles_batch_size:
                     batches.pop(topic)
                     await self._batches_queue.put((topic, batch))
                 count += 1

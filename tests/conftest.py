@@ -159,6 +159,7 @@ def mocked_kafka(monkeypatch):
 @pytest.fixture(autouse=True)
 def _injector(unused_tcp_port):
     config = Dict(
+        add_candles_batch_size="10",
         kafka_bootstrap_servers="foo,bar,baz",
         kafka_tasks_topic="grabber_tasks",
         kafka_trading_pairs_topic="assets_metadata",
