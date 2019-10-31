@@ -3,6 +3,7 @@ import uuid
 import collections
 import random
 import pickle
+import time
 from functools import partial
 
 import backoff
@@ -66,6 +67,7 @@ class Controller(Service):
         self._task_topic = config.kafka_tasks_topic
         self._assets_metadata_topic = config.kafka_trading_pairs_topic
         self._add_candles_batch_size = int(config.add_candles_batch_size)
+        self._add_candles_batch_timeout = int(config.add_candles_batch_timeout)
         self._version = version
         self._configure_router()
 
@@ -154,7 +156,8 @@ class Controller(Service):
 
     async def _finalize_batches(self, batches, count):
         logger.info("enque partial batches...")
-        for topic, batch in batches.items():
+        while batches:
+            topic, batch = batches.popitem()
             await self._batches_queue.put((topic, batch))
         logger.info("awaiting queued batches stored...")
         await self._batches_queue.join()
@@ -169,6 +172,7 @@ class Controller(Service):
         logger.info("add candles ws opened")
         rate = Rate(log_period=15, log_template="incoming rate: {:.3f} candles/s")
         batches = collections.defaultdict(list)
+        last_candle_time_by_topic = {}
         async for msg in ws:
             for c in json.loads(msg.data):
                 # TODO: support multiple intervals
@@ -188,11 +192,18 @@ class Controller(Service):
                 topic = published_trading_pairs[tp_key]
                 batch = batches[topic]
                 batch.append(c)
+                count += 1
+                rate.inc()
+                now = time.perf_counter()
+                last_candle_time_by_topic[topic] = now
                 if len(batch) >= self._add_candles_batch_size:
                     batches.pop(topic)
                     await self._batches_queue.put((topic, batch))
-                count += 1
-                rate.inc()
+                for topic, batch in list(batches.items()):
+                    last = last_candle_time_by_topic[topic]
+                    if now - last > self._add_candles_batch_timeout:
+                        batches.pop(topic)
+                        await self._batches_queue.put((topic, batch))
         # can't do "await" things here, since cancelation
         # https://docs.aiohttp.org/en/stable/web_advanced.html#web-handler-cancellation
         self.add_future(self._finalize_batches(batches, count))
