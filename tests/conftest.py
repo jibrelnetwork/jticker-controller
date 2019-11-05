@@ -251,8 +251,12 @@ class _FakeInfluxClient:
                     }
                 ]
             }
-        elif "delete" in q:
+        elif q.startswith("select * from \"topic\""):
+            return {"time": 123456}
+        elif "where time <" in q:
             assert q.endswith("where time < 1230768000000000000")
+        elif "where interval <>" in q:
+            assert q.endswith("123456")
         else:
             raise ValueError(f"Unknown query {q!r}")
 
