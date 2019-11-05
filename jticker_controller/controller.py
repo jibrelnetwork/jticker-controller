@@ -41,6 +41,11 @@ class AsyncResourceContext:
 @register(singleton=True, name="controller")
 class Controller(Service):
 
+    ALLOWED_CANDLE_INTERVALS = {
+        Interval.MIN_1.value,
+        Interval.D_1.value,
+    }
+
     @inject
     def __init__(self, web_server: WebServer, config: Dict, version: str):
         super().__init__()
@@ -123,6 +128,14 @@ class Controller(Service):
             coros = [c.query(f"""delete from "{topic}" where time < {int(EPOCH_START * 10 ** 9)}""")
                      for c in self.influx_clients]
             await asyncio.gather(*coros)
+            coros = [c.query(f"""select * from "{topic}" order by time limit 1""")
+                     for c in self.influx_clients]
+            rows = await asyncio.gather(*coros)
+            earliest = min(r["time"] for r in rows)
+            coros = [c.query(f"""delete from "{topic}"
+                              where interval <> '60' and time < {earliest}""")
+                     for c in self.influx_clients]
+            await asyncio.gather(*coros)
         logger.info("strip done")
 
     async def _schedule_strip(self, request):
@@ -175,8 +188,7 @@ class Controller(Service):
         last_candle_time_by_topic = {}
         async for msg in ws:
             for c in json.loads(msg.data):
-                # TODO: support multiple intervals
-                if c["interval"] != Interval.MIN_1.value:
+                if c["interval"] not in self.ALLOWED_CANDLE_INTERVALS:
                     continue
                 tp_key = exchange, symbol = c["exchange"], c["symbol"]
                 if tp_key not in published_trading_pairs:
