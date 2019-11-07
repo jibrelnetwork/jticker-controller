@@ -25,6 +25,7 @@ async def test_healthcheck(client):
     assert d == dict(healthy=True, version="TEST_VERSION")
 
 
+@pytest.mark.skip("will be refactored soon")
 @pytest.mark.asyncio
 async def test_strip(client, mocked_kafka, controller):
     await client("GET", "storage/strip", _raw=True)
