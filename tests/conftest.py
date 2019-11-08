@@ -1,19 +1,21 @@
 import collections
 import re
 import asyncio
+import time
 from functools import partial
 from dataclasses import dataclass
 from typing import Any
 
 import pytest
+import docker
 from addict import Dict
 from aiohttp import ClientSession, web
+from aioinflux import InfluxDBClient
 
-from jticker_core import injector
+from jticker_core import injector, WebServer
 
 from jticker_controller.controller import Controller
 from jticker_controller import controller as controller_module
-from jticker_core import WebServer
 
 
 class _FakeKafka:
@@ -156,22 +158,29 @@ def mocked_kafka(monkeypatch):
         yield fake_kafka
 
 
+@pytest.fixture(scope="session")
+def _influx_config():
+    return Dict(
+        influx_host="localhost",
+        influx_port="8086",
+        influx_db="db",
+        influx_username=None,
+        influx_password=None,
+        influx_ssl=False,
+        influx_unix_socket=None,
+        influx_chunk_size="1",
+    )
+
+
 @pytest.fixture(autouse=True)
-def _injector(unused_tcp_port):
+def _injector(unused_tcp_port, _influx_config):
     config = Dict(
         add_candles_batch_size="10",
         add_candles_batch_timeout="60",
         kafka_bootstrap_servers="foo,bar,baz",
         kafka_tasks_topic="grabber_tasks",
         kafka_trading_pairs_topic="assets_metadata",
-        influx_host="i,n,f,l,u,x",
-        influx_port="123",
-        influx_db="db",
-        influx_username="",
-        influx_password="",
-        influx_ssl="",
-        influx_unix_socket="",
-        influx_chunk_size="",
+        **_influx_config,
     )
     injector.register(lambda: config, name="config")
     injector.register(lambda: "127.0.0.1", name="web_host")
@@ -218,51 +227,53 @@ async def client(base_url, controller):
         yield request
 
 
-class _FakeInfluxClient:
+@pytest.fixture(autouse=True)
+def _mocks(automock):
+    with automock((controller_module, "InfluxDBClient")):
+        yield
 
-    def __init__(self, host, port, db, unix_socket, ssl, username, password, timeout):
-        assert host
-        assert isinstance(host, str)
-        assert isinstance(port, int)
-        assert isinstance(db, str)
-        assert isinstance(unix_socket, (type(None), str))
-        assert isinstance(ssl, bool)
-        assert isinstance(username, (type(None), str))
-        assert isinstance(password, (type(None), str))
-        assert isinstance(timeout, (type(None), float, int))
-        self._closed = False
 
-    async def close(self):
-        self._closed = True
-
-    async def query(self, q: str):
-        if q == "show measurements":
-            return {
-                "results": [
-                    {
-                        "statement_id": 0,
-                        "series": [
-                            {
-                                "name": "measurements",
-                                "columns": ["name"],
-                                "values": [["topic"]],
-                            }
-                        ]
-                    }
-                ]
-            }
-        elif q.startswith("select * from \"topic\""):
-            return {"time": 123456}
-        elif "where time <" in q:
-            assert q.endswith("where time < 1230768000000000000")
-        elif "where interval <>" in q:
-            assert q.endswith("123456")
+@pytest.fixture(scope="session", autouse=True)
+def _influx_container(_influx_config, automock_unlocked):
+    if automock_unlocked:
+        client = docker.from_env()
+        influx = client.containers.run(
+            image="influxdb:1.7-alpine",
+            auto_remove=True,
+            detach=True,
+            environment=dict(
+                INFLUXDB_DB=_influx_config.influx_db,
+            ),
+            name="jticker-controller-pytest-influx",
+            ports={
+                8086: 8086,
+            },
+            remove=True,
+        )
+        client = InfluxDBClient(db=_influx_config.influx_db, mode="blocking")
+        for _ in range(100):
+            try:
+                client.query("show measurements")
+            except Exception:
+                time.sleep(0.1)
+            else:
+                client.close()
+                break
         else:
-            raise ValueError(f"Unknown query {q!r}")
+            raise RuntimeError("Can't reach influx")
+    yield
+    if automock_unlocked:
+        influx.stop()
 
 
 @pytest.fixture(autouse=True)
-def _mocked_influx_client(monkeypatch):
-    with monkeypatch.context() as m:
-        m.setattr(controller_module, "InfluxDBClient", _FakeInfluxClient)
-        yield
+def _clear_influx(_influx_container, _influx_config, automock_unlocked):
+    if not automock_unlocked:
+        return
+    db = _influx_config.influx_db
+    client = InfluxDBClient(db=db, mode="blocking")
+    try:
+        client.query(f"drop database {db}")
+        client.query(f"create database {db}")
+    finally:
+        client.close()

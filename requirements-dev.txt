@@ -4,3 +4,4 @@ pytest-asyncio == 0.10.0
 pylama == 7.7.1
 mypy == 0.720.0
 async-timeout == 3.0.1
+docker == 4.1.0
