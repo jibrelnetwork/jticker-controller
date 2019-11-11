@@ -41,6 +41,11 @@ class AsyncResourceContext:
 @register(singleton=True, name="controller")
 class Controller(Service):
 
+    ALLOWED_CANDLE_INTERVALS = {
+        Interval.MIN_1.value,
+        Interval.D_1.value,
+    }
+
     @inject
     def __init__(self, web_server: WebServer, config: Dict, version: str):
         super().__init__()
@@ -106,23 +111,43 @@ class Controller(Service):
         )
         raise web.HTTPOk()
 
+    async def _do_influx_query(self, query):
+        coros = [c.query(query) for c in self.influx_clients]
+        responses = await asyncio.gather(*coros)
+        results = []
+        for response in responses:
+            rows = []
+            for row in iterpoints(response, lambda *x, meta: dict(zip(meta['columns'], x))):
+                rows.append(row)
+            results.append(rows)
+        return results
+
     async def _strip(self):
         # TODO: simplify when resolved
         # https://github.com/influxdata/influxdb/issues/9636
         logger.info("strip started")
-        coros = [c.query("show measurements") for c in self.influx_clients]
-        results = await asyncio.gather(*coros)
+        measurements = await self._do_influx_query("show measurements")
         topics = set()
-        for points in results:
-            for p in iterpoints(points):
-                topics.add(p[0])
+        for points in measurements:
+            for p in points:
+                name = p["name"]
+                if name != "mapping":
+                    topics.add(name)
         total = len(topics)
         logger.info("will strip {} topics", total)
         for topic in tqdm(topics, ncols=80, ascii=True, mininterval=10,
                           maxinterval=10, file=TqdmLogFile(logger=logger)):
-            coros = [c.query(f"""delete from "{topic}" where time < {int(EPOCH_START * 10 ** 9)}""")
-                     for c in self.influx_clients]
-            await asyncio.gather(*coros)
+            # remove by epoch
+            await self._do_influx_query(f"""delete from "{topic}"
+                                            where time < {int(EPOCH_START * 10 ** 9)}""")
+            # remove obsolete non-minute candles
+            responses = await self._do_influx_query(f"""select * from "{topic}"
+                                                        where interval = '60'
+                                                        order by time limit 1""")
+            earliest = min((r[0]["time"] for r in responses if r), default=None)
+            if earliest is not None:
+                await self._do_influx_query(f"""delete from "{topic}"
+                                                where interval <> '60' and time >= {earliest}""")
         logger.info("strip done")
 
     async def _schedule_strip(self, request):
@@ -175,8 +200,7 @@ class Controller(Service):
         last_candle_time_by_topic = {}
         async for msg in ws:
             for c in json.loads(msg.data):
-                # TODO: support multiple intervals
-                if c["interval"] != Interval.MIN_1.value:
+                if c["interval"] not in self.ALLOWED_CANDLE_INTERVALS:
                     continue
                 tp_key = exchange, symbol = c["exchange"], c["symbol"]
                 if tp_key not in published_trading_pairs:

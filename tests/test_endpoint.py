@@ -3,6 +3,7 @@ import pickle
 
 from aiohttp import ClientSession
 from async_timeout import timeout
+from aioinflux import iterpoints
 
 from jticker_core import Task, EPOCH_START, Candle, Interval, TradingPair
 
@@ -27,8 +28,60 @@ async def test_healthcheck(client):
 
 @pytest.mark.asyncio
 async def test_strip(client, mocked_kafka, controller):
-    await client("GET", "storage/strip", _raw=True)
+    ms = [
+        {
+            "measurement": "mapping",
+            "fields": {
+                "exchange": "EX",
+                "symbol": "AB",
+                "measurement": "EX_AB_random",
+            }
+        },
+        {
+            "measurement": "EX_AB_random",
+            "time": (EPOCH_START - 1) * 10 ** 9,
+            "tags": {"interval": "60"},
+            "fields": {"fake": 1},
+        },
+        {
+            "measurement": "EX_AB_random",
+            "time": (EPOCH_START) * 10 ** 9,
+            "tags": {"interval": "666"},
+            "fields": {"fake": 2},
+        },
+        {
+            "measurement": "EX_AB_random",
+            "time": (EPOCH_START + 86400) * 10 ** 9,
+            "tags": {"interval": "666"},
+            "fields": {"fake": 3},
+        },
+        {
+            "measurement": "EX_AB_random",
+            "time": (EPOCH_START + 86400) * 10 ** 9,
+            "tags": {"interval": "60"},
+            "fields": {"fake": 4},
+        },
+    ]
+    assert len(controller.influx_clients) == 1
+    influx_client = controller.influx_clients[0]
+    response = await influx_client.query("show measurements")
+    points = list(iterpoints(response))
+    assert not points
+    await influx_client.write(ms)
+    response = await influx_client.query("show measurements")
+    points = list(iterpoints(response))
+    assert len(points) == 2
+    response = await influx_client.query("select * from EX_AB_random")
+    points = list(iterpoints(response))
+    assert len(points) == 4
     await controller._strip()
+    response = await influx_client.query("select * from EX_AB_random")
+    points = list(iterpoints(response))
+    assert len(points) == 2
+    assert set(map(tuple, points)) == {
+        ((EPOCH_START) * 10 ** 9, 2, "666"),
+        ((EPOCH_START + 86400) * 10 ** 9, 4, "60"),
+    }
 
 
 @pytest.mark.asyncio
@@ -48,6 +101,8 @@ async def test_add_candles(base_url, mocked_kafka, controller):
     async with ClientSession() as session:
         async with session.ws_connect(f"{base_url}/ws/add_candles") as ws:
             await ws.send_json(data)
+            c.interval = Interval.M_3
+            await ws.send_json([c.as_dict()])
     assert len(mocked_kafka.data) == 2
     assert set(map(len, mocked_kafka.data.values())) == {1, 1001}
     await controller._producer.flush_called
