@@ -136,7 +136,7 @@ class Controller(Service):
         total = len(topics)
         logger.info("will strip {} topics", total)
         epoch = int(EPOCH_START * 10 ** 9)
-        for topic in tqdm(topics, ncols=80, ascii=True, mininterval=10,
+        for topic in tqdm(sorted(topics), ncols=80, ascii=True, mininterval=10,
                           maxinterval=10, file=TqdmLogFile(logger=logger)):
             responses = await self._do_influx_query(f"""select * from "{topic}"
                                                         order by time limit 1""")
