@@ -61,6 +61,12 @@ async def test_strip(client, mocked_kafka, controller):
             "tags": {"interval": "60"},
             "fields": {"fake": 4},
         },
+        {
+            "measurement": "EX_AB_random_single",
+            "time": (EPOCH_START + 86400) * 10 ** 9,
+            "tags": {"interval": "60"},
+            "fields": {"fake": 4},
+        },
     ]
     assert len(controller.influx_clients) == 1
     influx_client = controller.influx_clients[0]
@@ -70,7 +76,7 @@ async def test_strip(client, mocked_kafka, controller):
     await influx_client.write(ms)
     response = await influx_client.query("show measurements")
     points = list(iterpoints(response))
-    assert len(points) == 2
+    assert len(points) == 3
     response = await influx_client.query("select * from EX_AB_random")
     points = list(iterpoints(response))
     assert len(points) == 4
