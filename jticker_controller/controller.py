@@ -135,12 +135,23 @@ class Controller(Service):
                     topics.add(name)
         total = len(topics)
         logger.info("will strip {} topics", total)
-        for topic in tqdm(topics, ncols=80, ascii=True, mininterval=10,
+        epoch = int(EPOCH_START * 10 ** 9)
+        for topic in tqdm(sorted(topics), ncols=80, ascii=True, mininterval=10,
                           maxinterval=10, file=TqdmLogFile(logger=logger)):
+            responses = await self._do_influx_query(f"""select * from "{topic}"
+                                                        order by time limit 1""")
+            earliest = min((r[0]["time"] for r in responses if r), default=None)
+            if earliest is None:
+                continue
             # remove by epoch
-            await self._do_influx_query(f"""delete from "{topic}"
-                                            where time < {int(EPOCH_START * 10 ** 9)}""")
+            if earliest < epoch:
+                await self._do_influx_query(f"""delete from "{topic}"
+                                                where time < {epoch}""")
             # remove obsolete non-minute candles
+            responses = await self._do_influx_query(f"""show tag values from "{topic}"
+                                                        with key = "interval" """)
+            if len(responses[0]) == 1:
+                continue
             responses = await self._do_influx_query(f"""select * from "{topic}"
                                                         where interval = '60'
                                                         order by time limit 1""")
