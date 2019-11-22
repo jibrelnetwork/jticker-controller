@@ -18,7 +18,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from jticker_core import (inject, register, WebServer, Task, EPOCH_START, TradingPair, Interval,
-                          Rate, TqdmLogFile, normalize_kafka_topic)
+                          Rate, TqdmLogFile, normalize_kafka_topic, Candle)
 
 
 class AsyncResourceContext:
@@ -122,6 +122,17 @@ class Controller(Service):
             results.append(rows)
         return results
 
+    async def _strip_alphavantage(self, topic):
+        responses = await self._do_influx_query(f"""select * from {topic}
+                                                    where open = 0 or high = 0 or
+                                                        low = 0 or close = 0
+                                                    order by time""")
+        for r in responses:
+            for zp in r:
+                await self._do_influx_query(f"""delete from {topic}
+                                                where time = {zp["time"]} and
+                                                    interval = '{zp["interval"]}'""")
+
     async def _strip(self):
         # TODO: simplify when resolved
         # https://github.com/influxdata/influxdb/issues/9636
@@ -150,15 +161,19 @@ class Controller(Service):
             # remove obsolete non-minute candles
             responses = await self._do_influx_query(f"""show tag values from "{topic}"
                                                         with key = "interval" """)
-            if len(responses[0]) == 1:
-                continue
-            responses = await self._do_influx_query(f"""select * from "{topic}"
-                                                        where interval = '60'
-                                                        order by time limit 1""")
-            earliest = min((r[0]["time"] for r in responses if r), default=None)
-            if earliest is not None:
-                await self._do_influx_query(f"""delete from "{topic}"
-                                                where interval <> '60' and time >= {earliest}""")
+            if len(responses[0]) != 1:
+                responses = await self._do_influx_query(f"""select * from "{topic}"
+                                                            where interval = '60'
+                                                            order by time limit 1""")
+                earliest = min((r[0]["time"] for r in responses if r), default=None)
+                if earliest is not None:
+                    await self._do_influx_query(f"""delete from "{topic}"
+                                                    where interval <> '60' and
+                                                        time >= {earliest}""")
+
+            # ad-hoc alphavantage strip, should be removed later
+            if "alphavantage" in topic:
+                await self._strip_alphavantage(topic)
         logger.info("strip done")
 
     async def _schedule_strip(self, request):
@@ -211,6 +226,12 @@ class Controller(Service):
         last_candle_time_by_topic = {}
         async for msg in ws:
             for c in json.loads(msg.data):
+                try:
+                    # candle validation and normalization
+                    c = Candle.from_dict(c).as_dict()
+                except Exception:
+                    logger.exception("can't build candle from {}", c)
+                    continue
                 if c["interval"] not in self.ALLOWED_CANDLE_INTERVALS:
                     continue
                 tp_key = exchange, symbol = c["exchange"], c["symbol"]
