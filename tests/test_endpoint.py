@@ -67,6 +67,28 @@ async def test_strip(client, mocked_kafka, controller):
             "tags": {"interval": "60"},
             "fields": {"fake": 4},
         },
+        {
+            "measurement": "alphavantage",
+            "time": (EPOCH_START) * 10 ** 9,
+            "tags": {"interval": "60"},
+            "fields": {
+                "open": 2,
+                "high": 3,
+                "low": 1,
+                "close": 2,
+            },
+        },
+        {
+            "measurement": "alphavantage",
+            "time": (EPOCH_START + 60) * 10 ** 9,
+            "tags": {"interval": "60"},
+            "fields": {
+                "open": 2,
+                "high": 0,
+                "low": 1,
+                "close": 2,
+            },
+        },
     ]
     assert len(controller.influx_clients) == 1
     influx_client = controller.influx_clients[0]
@@ -76,7 +98,7 @@ async def test_strip(client, mocked_kafka, controller):
     await influx_client.write(ms)
     response = await influx_client.query("show measurements")
     points = list(iterpoints(response))
-    assert len(points) == 3
+    assert len(points) == 4
     response = await influx_client.query("select * from EX_AB_random")
     points = list(iterpoints(response))
     assert len(points) == 4
@@ -88,6 +110,11 @@ async def test_strip(client, mocked_kafka, controller):
         ((EPOCH_START) * 10 ** 9, 2, "666"),
         ((EPOCH_START + 86400) * 10 ** 9, 4, "60"),
     }
+    response = await influx_client.query("select * from alphavantage")
+    points = list(iterpoints(response))
+    assert len(points) == 1
+    assert points[0][0] == (EPOCH_START) * 10 ** 9
+    assert 0 not in points[0]
 
 
 @pytest.mark.asyncio

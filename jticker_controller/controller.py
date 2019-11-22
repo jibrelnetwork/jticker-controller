@@ -122,6 +122,17 @@ class Controller(Service):
             results.append(rows)
         return results
 
+    async def _strip_alphavantage(self, topic):
+        responses = await self._do_influx_query(f"""select * from {topic}
+                                                    where open = 0 or high = 0 or
+                                                        low = 0 or close = 0
+                                                    order by time""")
+        for r in responses:
+            for zp in r:
+                await self._do_influx_query(f"""delete from {topic}
+                                                where time = {zp["time"]} and
+                                                    interval = '{zp["interval"]}'""")
+
     async def _strip(self):
         # TODO: simplify when resolved
         # https://github.com/influxdata/influxdb/issues/9636
@@ -150,15 +161,19 @@ class Controller(Service):
             # remove obsolete non-minute candles
             responses = await self._do_influx_query(f"""show tag values from "{topic}"
                                                         with key = "interval" """)
-            if len(responses[0]) == 1:
-                continue
-            responses = await self._do_influx_query(f"""select * from "{topic}"
-                                                        where interval = '60'
-                                                        order by time limit 1""")
-            earliest = min((r[0]["time"] for r in responses if r), default=None)
-            if earliest is not None:
-                await self._do_influx_query(f"""delete from "{topic}"
-                                                where interval <> '60' and time >= {earliest}""")
+            if len(responses[0]) != 1:
+                responses = await self._do_influx_query(f"""select * from "{topic}"
+                                                            where interval = '60'
+                                                            order by time limit 1""")
+                earliest = min((r[0]["time"] for r in responses if r), default=None)
+                if earliest is not None:
+                    await self._do_influx_query(f"""delete from "{topic}"
+                                                    where interval <> '60' and
+                                                        time >= {earliest}""")
+
+            # ad-hoc alphavantage strip, should be removed later
+            if "alphavantage" in topic:
+                await self._strip_alphavantage(topic)
         logger.info("strip done")
 
     async def _schedule_strip(self, request):
