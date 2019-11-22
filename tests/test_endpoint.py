@@ -98,7 +98,7 @@ async def test_add_candles(base_url, mocked_kafka, controller):
         interval=Interval.MIN_1,
         open=1,
         high=2,
-        low=0,
+        low=0.1,
         close=1,
         timestamp=EPOCH_START + 1,
     )
@@ -108,6 +108,9 @@ async def test_add_candles(base_url, mocked_kafka, controller):
         async with session.ws_connect(f"{base_url}/ws/add_candles") as ws:
             await ws.send_json(data)
             c.interval = Interval.M_3
+            await ws.send_json([c.as_dict()])
+            c.interval = Interval.MIN_1
+            c.high, c.low = c.low, c.high
             await ws.send_json([c.as_dict()])
     assert len(mocked_kafka.data) == 2
     assert set(map(len, mocked_kafka.data.values())) == {1, 1001}
@@ -122,7 +125,7 @@ async def test_get_candles(base_url, mocked_kafka, controller):
         interval=Interval.MIN_1,
         open=1,
         high=2,
-        low=0,
+        low=0.1,
         close=1,
         timestamp=EPOCH_START + 1,
     )
