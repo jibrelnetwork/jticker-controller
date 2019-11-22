@@ -212,8 +212,8 @@ class Controller(Service):
         async for msg in ws:
             for c in json.loads(msg.data):
                 try:
-                    # candle validation
-                    Candle.from_dict(c)
+                    # candle validation and normalization
+                    c = Candle.from_dict(c).as_dict()
                 except Exception:
                     logger.exception("can't build candle from {}", c)
                     continue
