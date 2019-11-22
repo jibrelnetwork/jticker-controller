@@ -18,7 +18,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from jticker_core import (inject, register, WebServer, Task, EPOCH_START, TradingPair, Interval,
-                          Rate, TqdmLogFile, normalize_kafka_topic)
+                          Rate, TqdmLogFile, normalize_kafka_topic, Candle)
 
 
 class AsyncResourceContext:
@@ -211,6 +211,12 @@ class Controller(Service):
         last_candle_time_by_topic = {}
         async for msg in ws:
             for c in json.loads(msg.data):
+                try:
+                    # candle validation
+                    Candle.from_dict(c)
+                except Exception:
+                    logger.exception("can't build candle from {}", c)
+                    continue
                 if c["interval"] not in self.ALLOWED_CANDLE_INTERVALS:
                     continue
                 tp_key = exchange, symbol = c["exchange"], c["symbol"]

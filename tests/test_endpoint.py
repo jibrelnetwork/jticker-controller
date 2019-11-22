@@ -98,7 +98,7 @@ async def test_add_candles(base_url, mocked_kafka, controller):
         interval=Interval.MIN_1,
         open=1,
         high=2,
-        low=0,
+        low=0.1,
         close=1,
         timestamp=EPOCH_START + 1,
     )
@@ -122,7 +122,7 @@ async def test_get_candles(base_url, mocked_kafka, controller):
         interval=Interval.MIN_1,
         open=1,
         high=2,
-        low=0,
+        low=0.1,
         close=1,
         timestamp=EPOCH_START + 1,
     )
