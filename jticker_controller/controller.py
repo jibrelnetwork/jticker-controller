@@ -168,7 +168,8 @@ class Controller(Service):
                 earliest = min((r[0]["time"] for r in responses if r), default=None)
                 if earliest is not None:
                     await self._do_influx_query(f"""delete from "{topic}"
-                                                    where interval <> '60' and time >= {earliest}""")
+                                                    where interval <> '60' and
+                                                        time >= {earliest}""")
 
             # ad-hoc alphavantage strip, should be removed later
             if "alphavantage" in topic:
