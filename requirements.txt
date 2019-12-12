@@ -11,3 +11,4 @@ tqdm == 4.36.1
 # use orjson when possible
 ujson == 1.35
 mujson == 1.4
+tabulate == 0.8.6

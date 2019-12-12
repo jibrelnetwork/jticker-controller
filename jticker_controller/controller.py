@@ -79,6 +79,7 @@ class Controller(Service):
     def _configure_router(self):
         self.web_server.app.router.add_route("POST", "/task/add", self._add_task)
         self.web_server.app.router.add_route("GET", "/storage/strip", self._schedule_strip)
+        self.web_server.app.router.add_route("GET", "/storage/query", self._storage_query)
         self.web_server.app.router.add_route("GET", "/healthcheck", self._healthcheck)
         self.web_server.app.router.add_route("GET", "/ws/add_candles", self.add_candles_ws_handler)
         self.web_server.app.router.add_route("GET", "/list_topics", self.list_topics)
@@ -180,6 +181,19 @@ class Controller(Service):
         logger.info("strip scheduled")
         self.add_future(self._strip())
         raise web.HTTPOk()
+
+    async def _storage_query(self, request):
+        query = request.query.get("query")
+        if query is None:
+            raise web.HTTPBadRequest("Missed query paraemeter `query`")
+        try:
+            result = await self._do_influx_query(query)
+            result = {"status": "ok", "result": result}
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            result = {"status": "error", "exception": str(e)}
+        return web.json_response(result)
 
     async def _healthcheck(self, request):
         return web.json_response(dict(healthy=True, version=self._version))
