@@ -206,14 +206,14 @@ class Controller(Service):
             request.method,
             f"{self.influx_raw_url}/query",
             params=request.query,
+            data=await request.post(),
         )
-        logger.info("raw storage request {} {} {}", request.method, self.influx_raw_url, request.query)
         async with subrequest as response:
-            raw = await response.read()
-            logger.info("raw storage response {}", response)
-            return web.Response(body=raw, status=response.status,
-                                content_type=response.content_type)
-            return web.json_response(await response.json())
+            return web.Response(
+                status=response.status,
+                content_type=response.content_type,
+                body=await response.read(),
+            )
 
     async def _healthcheck(self, request):
         return web.json_response(dict(healthy=True, version=self._version))
