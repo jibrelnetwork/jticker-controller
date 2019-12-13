@@ -172,3 +172,14 @@ async def test_get_candles(base_url, mocked_kafka, controller):
                 data = pickle.loads(msgs[0].data)
                 assert c == Candle.from_json(data[0].value)
                 assert msgs[1].data == b""
+
+
+@pytest.mark.asyncio
+async def test_storage_query(controller, client):
+    response = await client("GET", "storage/query?query=show%20databases")
+    assert response["status"] == "ok"
+    per_influx_response = response["result"]
+    assert len(per_influx_response) == 1
+    rows = per_influx_response[0]
+    assert len(rows) == 1
+    assert rows[0]["name"] == "db"
