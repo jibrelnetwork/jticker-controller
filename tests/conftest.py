@@ -251,9 +251,9 @@ def _influx_container(_influx_config, automock_unlocked):
             remove=True,
         )
         client = InfluxDBClient(db=_influx_config.influx_db, mode="blocking")
-        for _ in range(100):
+        for _ in range(200):
             try:
-                client.query("show measurements")
+                client.ping()
             except Exception:
                 time.sleep(0.1)
             else:

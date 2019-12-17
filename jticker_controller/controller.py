@@ -8,7 +8,7 @@ from functools import partial
 
 import backoff
 import mujson as json
-from aiohttp import web
+from aiohttp import web, ClientSession
 from mode import Service
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer, TopicPartition
 from aiokafka.errors import ConnectionError as KafkaConnectionError
@@ -57,9 +57,12 @@ class Controller(Service):
             key_serializer=lambda s: s.encode("utf-8"),
             value_serializer=lambda s: s.encode("utf-8"),
         )
+        self.influx_hosts = config.influx_host.split(",")
+        self.influx_port = int(config.influx_port)
+        self.influx_raw_url = f"http://{self.influx_hosts[0]}:{self.influx_port}"
         cli = partial(
             InfluxDBClient,
-            port=int(config.influx_port),
+            port=self.influx_port,
             db=config.influx_db,
             unix_socket=config.influx_unix_socket,
             ssl=bool(config.influx_ssl),
@@ -67,7 +70,7 @@ class Controller(Service):
             password=config.influx_password,
             timeout=60 * 60,
         )
-        self.influx_clients = [cli(host=h) for h in config.influx_host.split(",")]
+        self.influx_clients = [cli(host=h) for h in self.influx_hosts]
         self._batches_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
         self._task_topic = config.kafka_tasks_topic
         self._assets_metadata_topic = config.kafka_trading_pairs_topic
@@ -79,6 +82,8 @@ class Controller(Service):
     def _configure_router(self):
         self.web_server.app.router.add_route("POST", "/task/add", self._add_task)
         self.web_server.app.router.add_route("GET", "/storage/strip", self._schedule_strip)
+        self.web_server.app.router.add_route("GET", "/storage/query", self._storage_query)
+        self.web_server.app.router.add_route("*", "/storage/raw/query", self._storage_raw_query)
         self.web_server.app.router.add_route("GET", "/healthcheck", self._healthcheck)
         self.web_server.app.router.add_route("GET", "/ws/add_candles", self.add_candles_ws_handler)
         self.web_server.app.router.add_route("GET", "/list_topics", self.list_topics)
@@ -96,8 +101,10 @@ class Controller(Service):
     async def on_start(self):
         await self._producer.start()
         self.add_future(self._batch_writer())
+        self._raw_storage_session = ClientSession()
 
     async def on_stop(self):
+        await self._raw_storage_session.close()
         await self._producer.stop()
         await asyncio.gather(*[c.close() for c in self.influx_clients])
 
@@ -180,6 +187,33 @@ class Controller(Service):
         logger.info("strip scheduled")
         self.add_future(self._strip())
         raise web.HTTPOk()
+
+    async def _storage_query(self, request):
+        query = request.query.get("query")
+        if query is None:
+            raise web.HTTPBadRequest("Missed query paraemeter `query`")
+        try:
+            result = await self._do_influx_query(query)
+            result = {"status": "ok", "result": result}
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            result = {"status": "error", "exception": str(e)}
+        return web.json_response(result)
+
+    async def _storage_raw_query(self, request):
+        subrequest = self._raw_storage_session.request(
+            request.method,
+            f"{self.influx_raw_url}/query",
+            params=request.query,
+            data=await request.post(),
+        )
+        async with subrequest as response:
+            return web.Response(
+                status=response.status,
+                content_type=response.content_type,
+                body=await response.read(),
+            )
 
     async def _healthcheck(self, request):
         return web.json_response(dict(healthy=True, version=self._version))
