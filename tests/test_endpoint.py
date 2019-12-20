@@ -1,9 +1,9 @@
 import pytest
 import pickle
+import asyncio
 
 from aiohttp import ClientSession
 from async_timeout import timeout
-from aioinflux import iterpoints
 
 from jticker_core import Task, EPOCH_START, Candle, Interval, TradingPair
 
@@ -24,97 +24,6 @@ async def test_add_task(client, mocked_kafka):
 async def test_healthcheck(client):
     d = await client("GET", "healthcheck")
     assert d == dict(healthy=True, version="TEST_VERSION")
-
-
-@pytest.mark.asyncio
-async def test_strip(client, mocked_kafka, controller):
-    ms = [
-        {
-            "measurement": "mapping",
-            "fields": {
-                "exchange": "EX",
-                "symbol": "AB",
-                "measurement": "EX_AB_random",
-            }
-        },
-        {
-            "measurement": "EX_AB_random",
-            "time": (EPOCH_START - 1) * 10 ** 9,
-            "tags": {"interval": "60"},
-            "fields": {"fake": 1},
-        },
-        {
-            "measurement": "EX_AB_random",
-            "time": (EPOCH_START) * 10 ** 9,
-            "tags": {"interval": "666"},
-            "fields": {"fake": 2},
-        },
-        {
-            "measurement": "EX_AB_random",
-            "time": (EPOCH_START + 86400) * 10 ** 9,
-            "tags": {"interval": "666"},
-            "fields": {"fake": 3},
-        },
-        {
-            "measurement": "EX_AB_random",
-            "time": (EPOCH_START + 86400) * 10 ** 9,
-            "tags": {"interval": "60"},
-            "fields": {"fake": 4},
-        },
-        {
-            "measurement": "EX_AB_random_single",
-            "time": (EPOCH_START + 86400) * 10 ** 9,
-            "tags": {"interval": "60"},
-            "fields": {"fake": 4},
-        },
-        {
-            "measurement": "alphavantage",
-            "time": (EPOCH_START) * 10 ** 9,
-            "tags": {"interval": "60"},
-            "fields": {
-                "open": 2,
-                "high": 3,
-                "low": 1,
-                "close": 2,
-            },
-        },
-        {
-            "measurement": "alphavantage",
-            "time": (EPOCH_START + 60) * 10 ** 9,
-            "tags": {"interval": "60"},
-            "fields": {
-                "open": 2,
-                "high": 0,
-                "low": 1,
-                "close": 2,
-            },
-        },
-    ]
-    assert len(controller.influx_clients) == 1
-    influx_client = controller.influx_clients[0]
-    response = await influx_client.query("show measurements")
-    points = list(iterpoints(response))
-    assert not points
-    await influx_client.write(ms)
-    response = await influx_client.query("show measurements")
-    points = list(iterpoints(response))
-    assert len(points) == 4
-    response = await influx_client.query("select * from EX_AB_random")
-    points = list(iterpoints(response))
-    assert len(points) == 4
-    await controller._strip()
-    response = await influx_client.query("select * from EX_AB_random")
-    points = list(iterpoints(response))
-    assert len(points) == 2
-    assert set(map(tuple, points)) == {
-        ((EPOCH_START) * 10 ** 9, 2, "666"),
-        ((EPOCH_START + 86400) * 10 ** 9, 4, "60"),
-    }
-    response = await influx_client.query("select * from alphavantage")
-    points = list(iterpoints(response))
-    assert len(points) == 1
-    assert points[0][0] == (EPOCH_START) * 10 ** 9
-    assert 0 not in points[0]
 
 
 @pytest.mark.asyncio
@@ -178,8 +87,27 @@ async def test_get_candles(base_url, mocked_kafka, controller):
 async def test_storage_query(controller, client):
     response = await client("GET", "storage/query?query=show%20databases")
     assert response["status"] == "ok"
-    per_influx_response = response["result"]
-    assert len(per_influx_response) == 1
-    rows = per_influx_response[0]
-    assert len(rows) == 1
-    assert rows[0]["name"] == "db"
+    result = response["result"]
+    assert result["0"] == []
+    await client("GET", "storage/query?query=create%20database%20foo")
+    response = await client("GET", "storage/query?query=show%20databases")
+    assert response["status"] == "ok"
+    result = response["result"]
+    assert result["0"] == [{"name": "foo"}]
+
+    response = await client("GET", "storage/query", _raw=True)
+    assert response.status == 400
+
+    response = await client("GET", "storage/query?query=foobar")
+    assert response["status"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_migration(controller, client):
+    await client("GET", "storage/migrate", _raw=True)
+    async with timeout(10):
+        while True:
+            await asyncio.sleep(0.1)
+            names = set(await controller.time_series.client.show_databases())
+            if names == {"service", "candles"}:
+                break

@@ -16,15 +16,15 @@ def _do_request(url, q):
         if data["status"] == "error":
             print("error:", data["exception"])
             return
-        for i, inf_data in enumerate(data["result"]):
+        for series, inf_data in data["result"].items():
             if not inf_data:
                 continue
-            print(f"influx #{i}:")
+            print(f"series #{series}:")
             print(tabulate(inf_data, headers="keys"))
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser("cli")
     parser.add_argument("controller", help="Controller host:port address")
     ns = parser.parse_args()
     url = f"http://{ns.controller}/storage/query"
