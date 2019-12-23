@@ -1,16 +1,13 @@
 import collections
 import re
 import asyncio
-import time
 from functools import partial
 from dataclasses import dataclass
 from typing import Any
 
 import pytest
-import docker
 from addict import Dict
 from aiohttp import ClientSession, web
-from aioinflux import InfluxDBClient
 
 from jticker_core import injector, WebServer
 
@@ -161,7 +158,7 @@ def mocked_kafka(monkeypatch):
 @pytest.fixture(scope="session")
 def _influx_config():
     return Dict(
-        influx_host="localhost",
+        influx_host="127.0.0.1",
         influx_port="8086",
         influx_db="db",
         influx_username=None,
@@ -172,21 +169,25 @@ def _influx_config():
     )
 
 
-@pytest.fixture(autouse=True)
-def _injector(unused_tcp_port, _influx_config):
+@pytest.fixture(autouse=True, scope="session")
+def config(_influx_config):
     config = Dict(
         add_candles_batch_size="10",
         add_candles_batch_timeout="60",
         kafka_bootstrap_servers="foo,bar,baz",
         kafka_tasks_topic="grabber_tasks",
         kafka_trading_pairs_topic="assets_metadata",
+        time_series_host="127.0.0.1",
+        time_series_port="8086",
+        time_series_allow_migrations=True,
+        time_series_default_row_limit="1000",
+        web_host="127.0.0.1",
+        web_port="8080",
         **_influx_config,
     )
     injector.register(lambda: config, name="config")
-    injector.register(lambda: "127.0.0.1", name="web_host")
-    injector.register(lambda: str(unused_tcp_port), name="web_port")
     injector.register(lambda: "TEST_VERSION", name="version")
-    return injector
+    return config
 
 
 @pytest.fixture
@@ -200,15 +201,15 @@ async def _web_server(_web_app):
 
 
 @pytest.fixture
-async def controller(_web_server):
-    async with Controller(web_server=_web_server) as controller:
+async def controller(_web_server, time_series, clean_influx):
+    async with Controller(web_server=_web_server, time_series=time_series) as controller:
         yield controller
 
 
 @pytest.fixture
-def base_url(_injector):
-    host = _injector.get("web_host")
-    port = _injector.get("web_port")
+def base_url(config):
+    host = config.web_host
+    port = config.web_port
     return f"http://{host}:{port}"
 
 
@@ -217,63 +218,11 @@ async def client(base_url, controller):
     async def request(method, path, *, _raw=False, **json):
         url = f"{base_url}/{path}"
         async with session.request(method, url, json=json) as response:
-            assert response.status == 200
             await response.read()
             if _raw:
                 return response
             else:
+                assert response.status == 200
                 return await response.json()
     async with ClientSession() as session:
         yield request
-
-
-@pytest.fixture(autouse=True)
-def _mocks(automock):
-    with automock((controller_module, "InfluxDBClient")):
-        yield
-
-
-@pytest.fixture(scope="session", autouse=True)
-def _influx_container(_influx_config, automock_unlocked):
-    if automock_unlocked:
-        client = docker.from_env()
-        influx = client.containers.run(
-            image="influxdb:1.7-alpine",
-            auto_remove=True,
-            detach=True,
-            environment=dict(
-                INFLUXDB_DB=_influx_config.influx_db,
-            ),
-            name="jticker-controller-pytest-influx",
-            ports={
-                8086: 8086,
-            },
-            remove=True,
-        )
-        client = InfluxDBClient(db=_influx_config.influx_db, mode="blocking")
-        for _ in range(200):
-            try:
-                client.ping()
-            except Exception:
-                time.sleep(0.1)
-            else:
-                client.close()
-                break
-        else:
-            raise RuntimeError("Can't reach influx")
-    yield
-    if automock_unlocked:
-        influx.stop()
-
-
-@pytest.fixture(autouse=True)
-def _clear_influx(_influx_container, _influx_config, automock_unlocked):
-    if not automock_unlocked:
-        return
-    db = _influx_config.influx_db
-    client = InfluxDBClient(db=db, mode="blocking")
-    try:
-        client.query(f"drop database {db}")
-        client.query(f"create database {db}")
-    finally:
-        client.close()

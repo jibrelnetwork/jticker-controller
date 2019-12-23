@@ -4,7 +4,7 @@ import collections
 import random
 import pickle
 import time
-from functools import partial
+from functools import wraps
 
 import backoff
 import mujson as json
@@ -13,12 +13,10 @@ from mode import Service
 from aiokafka import AIOKafkaProducer, AIOKafkaConsumer, TopicPartition
 from aiokafka.errors import ConnectionError as KafkaConnectionError
 from addict import Dict
-from aioinflux import InfluxDBClient, iterpoints
 from loguru import logger
-from tqdm import tqdm
 
-from jticker_core import (inject, register, WebServer, Task, EPOCH_START, TradingPair, Interval,
-                          Rate, TqdmLogFile, normalize_kafka_topic, Candle)
+from jticker_core import (inject, register, WebServer, Task, TradingPair, Interval,
+                          Rate, normalize_kafka_topic, Candle, AbstractTimeSeriesStorage)
 
 
 class AsyncResourceContext:
@@ -47,7 +45,8 @@ class Controller(Service):
     }
 
     @inject
-    def __init__(self, web_server: WebServer, config: Dict, version: str):
+    def __init__(self, web_server: WebServer, config: Dict, version: str,
+                 time_series: AbstractTimeSeriesStorage):
         super().__init__()
         self.web_server = web_server
         self._bootstrap_servers = config.kafka_bootstrap_servers.split(",")
@@ -57,20 +56,8 @@ class Controller(Service):
             key_serializer=lambda s: s.encode("utf-8"),
             value_serializer=lambda s: s.encode("utf-8"),
         )
-        self.influx_hosts = config.influx_host.split(",")
-        self.influx_port = int(config.influx_port)
-        self.influx_raw_url = f"http://{self.influx_hosts[0]}:{self.influx_port}"
-        cli = partial(
-            InfluxDBClient,
-            port=self.influx_port,
-            db=config.influx_db,
-            unix_socket=config.influx_unix_socket,
-            ssl=bool(config.influx_ssl),
-            username=config.influx_username,
-            password=config.influx_password,
-            timeout=60 * 60,
-        )
-        self.influx_clients = [cli(host=h) for h in self.influx_hosts]
+        self.influx_raw_url = f"http://{config.time_series_host}:{config.time_series_port}"
+        self.time_series = time_series
         self._batches_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
         self._task_topic = config.kafka_tasks_topic
         self._assets_metadata_topic = config.kafka_trading_pairs_topic
@@ -80,8 +67,9 @@ class Controller(Service):
         self._configure_router()
 
     def _configure_router(self):
+        self.web_server.app.router.add_route("GET", "/storage/migrate",
+                                             self.background_task_handler(self._migrate))
         self.web_server.app.router.add_route("POST", "/task/add", self._add_task)
-        self.web_server.app.router.add_route("GET", "/storage/strip", self._schedule_strip)
         self.web_server.app.router.add_route("GET", "/storage/query", self._storage_query)
         self.web_server.app.router.add_route("*", "/storage/raw/query", self._storage_raw_query)
         self.web_server.app.router.add_route("GET", "/healthcheck", self._healthcheck)
@@ -92,6 +80,7 @@ class Controller(Service):
     def on_init_dependencies(self):
         return [
             self.web_server,
+            self.time_series,
         ]
 
     @backoff.on_exception(
@@ -106,7 +95,14 @@ class Controller(Service):
     async def on_stop(self):
         await self._raw_storage_session.close()
         await self._producer.stop()
-        await asyncio.gather(*[c.close() for c in self.influx_clients])
+
+    def background_task_handler(self, f):
+        @wraps(f)
+        async def wrapper(*args, **kwargs):
+            logger.info("scheduling {}", f.__name__)
+            self.add_future(f())
+            raise web.HTTPOk()
+        return wrapper
 
     async def _add_task(self, request):
         data = await request.json()
@@ -118,82 +114,15 @@ class Controller(Service):
         )
         raise web.HTTPOk()
 
-    async def _do_influx_query(self, query):
-        coros = [c.query(query) for c in self.influx_clients]
-        responses = await asyncio.gather(*coros)
-        results = []
-        for response in responses:
-            rows = []
-            for row in iterpoints(response, lambda *x, meta: dict(zip(meta['columns'], x))):
-                rows.append(row)
-            results.append(rows)
-        return results
-
-    async def _strip_alphavantage(self, topic):
-        responses = await self._do_influx_query(f"""select * from {topic}
-                                                    where open = 0 or high = 0 or
-                                                        low = 0 or close = 0
-                                                    order by time""")
-        for r in responses:
-            for zp in r:
-                await self._do_influx_query(f"""delete from {topic}
-                                                where time = {zp["time"]} and
-                                                    interval = '{zp["interval"]}'""")
-
-    async def _strip(self):
-        # TODO: simplify when resolved
-        # https://github.com/influxdata/influxdb/issues/9636
-        logger.info("strip started")
-        measurements = await self._do_influx_query("show measurements")
-        topics = set()
-        for points in measurements:
-            for p in points:
-                name = p["name"]
-                if name != "mapping":
-                    topics.add(name)
-        total = len(topics)
-        logger.info("will strip {} topics", total)
-        epoch = int(EPOCH_START * 10 ** 9)
-        for topic in tqdm(sorted(topics), ncols=80, ascii=True, mininterval=10,
-                          maxinterval=10, file=TqdmLogFile(logger=logger)):
-            responses = await self._do_influx_query(f"""select * from "{topic}"
-                                                        order by time limit 1""")
-            earliest = min((r[0]["time"] for r in responses if r), default=None)
-            if earliest is None:
-                continue
-            # remove by epoch
-            if earliest < epoch:
-                await self._do_influx_query(f"""delete from "{topic}"
-                                                where time < {epoch}""")
-            # remove obsolete non-minute candles
-            responses = await self._do_influx_query(f"""show tag values from "{topic}"
-                                                        with key = "interval" """)
-            if len(responses[0]) != 1:
-                responses = await self._do_influx_query(f"""select * from "{topic}"
-                                                            where interval = '60'
-                                                            order by time limit 1""")
-                earliest = min((r[0]["time"] for r in responses if r), default=None)
-                if earliest is not None:
-                    await self._do_influx_query(f"""delete from "{topic}"
-                                                    where interval <> '60' and
-                                                        time >= {earliest}""")
-
-            # ad-hoc alphavantage strip, should be removed later
-            if "alphavantage" in topic:
-                await self._strip_alphavantage(topic)
-        logger.info("strip done")
-
-    async def _schedule_strip(self, request):
-        logger.info("strip scheduled")
-        self.add_future(self._strip())
-        raise web.HTTPOk()
+    async def _migrate(self):
+        await self.time_series.migrate()
 
     async def _storage_query(self, request):
         query = request.query.get("query")
         if query is None:
-            raise web.HTTPBadRequest("Missed query paraemeter `query`")
+            raise web.HTTPBadRequest(reason="Missed query paraemeter `query`")
         try:
-            result = await self._do_influx_query(query)
+            result = await self.time_series.client.query(query)
             result = {"status": "ok", "result": result}
         except asyncio.CancelledError:
             raise

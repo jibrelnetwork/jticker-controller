@@ -1,12 +1,10 @@
 mode == 4.0.1
 aiohttp == 3.5.4
-giveme == 1.0.0
 sentry-sdk == 0.7.10
 loguru == 0.3.2
 addict == 2.2.1
 aiokafka == 0.5.2
 backoff == 1.8.0
-aioinflux == 0.9.0
 tqdm == 4.36.1
 # use orjson when possible
 ujson == 1.35
