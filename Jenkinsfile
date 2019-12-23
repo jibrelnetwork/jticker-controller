@@ -27,7 +27,8 @@ builder(
                         jUnitPath: '/junit-reports',
                         coveragePath: '/coverage-reports',
                         command: [
-                                'pip install -e ./[dev]',
+                                'pip install --no-cache-dir -e ./jticker-core/[dev]',
+                                'pip install --no-cache-dir -e ./[dev]',
                                 'mkdir -p /junit-reports',
                                 'pytest --junitxml=/junit-reports/pytest-junit-report.xml --cov-report xml:/coverage-reports/pytest-coverage-report.xml',
                         ],
