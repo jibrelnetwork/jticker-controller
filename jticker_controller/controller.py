@@ -15,7 +15,7 @@ from aiokafka.errors import ConnectionError as KafkaConnectionError
 from addict import Dict
 from loguru import logger
 
-from jticker_core import (inject, register, WebServer, Task, TradingPair, Interval,
+from jticker_core import (inject, register, WebServer, Task, RawTradingPair, Interval,
                           Rate, normalize_kafka_topic, Candle, AbstractTimeSeriesStorage)
 
 
@@ -201,7 +201,7 @@ class Controller(Service):
                 if tp_key not in published_trading_pairs:
                     trading_pair_key_string = f"{exchange}:{symbol}"
                     topic = f"{exchange}_{symbol}_{c['interval']}"
-                    trading_pair = TradingPair(symbol, exchange, topic=topic)
+                    trading_pair = RawTradingPair(symbol, exchange, topic=topic)
                     await self._producer.send(
                         "assets_metadata",
                         value=trading_pair.as_json(),

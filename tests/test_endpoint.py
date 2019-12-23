@@ -5,7 +5,7 @@ import asyncio
 from aiohttp import ClientSession
 from async_timeout import timeout
 
-from jticker_core import Task, EPOCH_START, Candle, Interval, TradingPair
+from jticker_core import Task, EPOCH_START, Candle, Interval, RawTradingPair
 
 
 @pytest.mark.asyncio
@@ -65,7 +65,8 @@ async def test_get_candles(base_url, mocked_kafka, controller):
         close=1,
         timestamp=EPOCH_START + 1,
     )
-    mocked_kafka.put("assets_metadata", TradingPair(symbol=c.symbol, exchange=c.exchange).as_json())
+    tp = RawTradingPair(symbol=c.symbol, exchange=c.exchange).as_json()
+    mocked_kafka.put("assets_metadata", tp)
     mocked_kafka.put("exchange_AB_60", c.as_json())
     async with ClientSession() as session:
         async with session.get(f"{base_url}/list_topics") as response:
