@@ -158,7 +158,7 @@ def mocked_kafka(monkeypatch):
 @pytest.fixture(scope="session")
 def _influx_config():
     return Dict(
-        influx_host="localhost",
+        influx_host="127.0.0.1",
         influx_port="8086",
         influx_db="db",
         influx_username=None,
@@ -177,11 +177,11 @@ def config(_influx_config):
         kafka_bootstrap_servers="foo,bar,baz",
         kafka_tasks_topic="grabber_tasks",
         kafka_trading_pairs_topic="assets_metadata",
-        time_series_host="localhost",
+        time_series_host="127.0.0.1",
         time_series_port="8086",
         time_series_allow_migrations=True,
         time_series_default_row_limit="1000",
-        web_host="localhost",
+        web_host="127.0.0.1",
         web_port="8080",
         **_influx_config,
     )
