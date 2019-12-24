@@ -5,7 +5,7 @@ import asyncio
 from aiohttp import ClientSession
 from async_timeout import timeout
 
-from jticker_core import Task, EPOCH_START, Candle, Interval, TradingPair
+from jticker_core import Task, EPOCH_START, Candle, Interval, RawTradingPair
 
 
 @pytest.mark.asyncio
@@ -38,16 +38,16 @@ async def test_add_candles(base_url, mocked_kafka, controller):
         close=1,
         timestamp=EPOCH_START + 1,
     )
-    data = [c.as_dict()] * 1001
+    data = [c.to_dict(encode_json=True)] * 1001
     assert not mocked_kafka.data
     async with ClientSession() as session:
         async with session.ws_connect(f"{base_url}/ws/add_candles") as ws:
             await ws.send_json(data)
             c.interval = Interval.M_3
-            await ws.send_json([c.as_dict()])
+            await ws.send_json([c.to_dict(encode_json=True)])
             c.interval = Interval.MIN_1
             c.high, c.low = c.low, c.high
-            await ws.send_json([c.as_dict()])
+            await ws.send_json([c.to_dict(encode_json=True)])
     assert len(mocked_kafka.data) == 2
     assert set(map(len, mocked_kafka.data.values())) == {1, 1001}
     await controller._producer.flush_called
@@ -65,8 +65,9 @@ async def test_get_candles(base_url, mocked_kafka, controller):
         close=1,
         timestamp=EPOCH_START + 1,
     )
-    mocked_kafka.put("assets_metadata", TradingPair(symbol=c.symbol, exchange=c.exchange).as_json())
-    mocked_kafka.put("exchange_AB_60", c.as_json())
+    tp = RawTradingPair(symbol=c.symbol, exchange=c.exchange).to_json()
+    mocked_kafka.put("assets_metadata", tp)
+    mocked_kafka.put("exchange_AB_60", c.to_json())
     async with ClientSession() as session:
         async with session.get(f"{base_url}/list_topics") as response:
             topics = await response.json()
