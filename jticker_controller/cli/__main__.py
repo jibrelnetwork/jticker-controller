@@ -16,7 +16,7 @@ def _do_request(url, q):
         if data["status"] == "error":
             print("error:", data["exception"])
             return
-        for series, inf_data in data["result"].items():
+        for series, inf_data in enumerate(data["result"]):
             if not inf_data:
                 continue
             print(f"series #{series}:")
@@ -25,9 +25,9 @@ def _do_request(url, q):
 
 def main():
     parser = argparse.ArgumentParser("cli")
-    parser.add_argument("controller", help="Controller host:port address")
+    parser.add_argument("controller", help="Controller url address")
     ns = parser.parse_args()
-    url = f"http://{ns.controller}/storage/query"
+    url = f"{ns.controller}/storage/query"
     print(f"Simple storage query via remote controller ({url})")
     while True:
         try:

@@ -109,7 +109,7 @@ class Controller(Service):
         task = Task.from_dict(data)
         await self._producer.send_and_wait(
             self._task_topic,
-            value=task.as_json(),
+            value=task.to_json(),
             key=uuid.uuid4().hex,
         )
         raise web.HTTPOk()
@@ -191,7 +191,7 @@ class Controller(Service):
             for c in json.loads(msg.data):
                 try:
                     # candle validation and normalization
-                    c = Candle.from_dict(c).as_dict()
+                    c = Candle.from_dict(c).to_dict(encode_json=True)
                 except Exception:
                     logger.exception("can't build candle from {}", c)
                     continue
@@ -204,7 +204,7 @@ class Controller(Service):
                     trading_pair = RawTradingPair(symbol, exchange, topic=topic)
                     await self._producer.send(
                         "assets_metadata",
-                        value=trading_pair.as_json(),
+                        value=trading_pair.to_json(),
                         key=trading_pair_key_string,
                     )
                     published_trading_pairs[tp_key] = topic
