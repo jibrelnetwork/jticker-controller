@@ -1,24 +1,20 @@
-FROM python:3.7-alpine
+FROM python:3.7-alpine as builder
 
-ENV KAFKA_BOOTSTRAP_SERVERS "kafka:9092"
-ENV LOG_LEVEL "INFO"
-ENV SENTRY_DSN ""
+RUN apk update && apk add gcc musl-dev git
+COPY jticker-core/requirements.txt /requirements-core.txt
+COPY requirements.txt /
+RUN pip install --no-cache-dir -r requirements-core.txt -r requirements.txt
+
+FROM python:3.7-alpine as runner
+
+COPY --from=builder /usr/local/lib/python3.7/site-packages/ /usr/local/lib/python3.7/site-packages/
 
 RUN addgroup -g 111 app \
  && adduser -D -u 111 -G app app \
  && mkdir -p /app \
  && chown -R app:app /app
 
-# build dependencies
-RUN apk update && apk add gcc musl-dev git
-
-# optional aiokafka dependency https://aiokafka.readthedocs.io/en/stable/#optional-snappy-install
-# RUN apk update && apk add snappy-dev
-
 WORKDIR /app
-
-COPY --chown=app:app requirements.txt /app/
-RUN pip install --no-cache-dir -r requirements.txt
 
 COPY --chown=app:app . /app
 RUN pip install --no-cache-dir -e ./jticker-core -e ./
