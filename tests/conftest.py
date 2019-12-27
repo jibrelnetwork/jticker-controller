@@ -181,6 +181,7 @@ def config(_influx_config):
         time_series_port="8086",
         time_series_allow_migrations=True,
         time_series_default_row_limit="1000",
+        time_series_client_timeout="10",
         web_host="127.0.0.1",
         web_port="8080",
         **_influx_config,
