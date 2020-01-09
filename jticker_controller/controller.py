@@ -87,7 +87,7 @@ class Controller(Service):
         backoff.expo,
         (KafkaConnectionError,),
         max_time=120)
-    async def on_start(self):
+    async def on_started(self):
         await self._producer.start()
         self.add_future(self._batch_writer())
         self._raw_storage_session = ClientSession()

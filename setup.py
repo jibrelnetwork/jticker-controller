@@ -12,7 +12,7 @@ def read_requirements(name: str):
 version = Path("version.txt").read_text().strip().split("-")[0]
 setup(
     version=version,
-    install_requires=read_requirements("requirements.txt"),
+    install_requires=read_requirements("requirements.txt") + ["jticker-core"],
     extras_require={
         "dev": read_requirements("requirements-dev.txt"),
     }
