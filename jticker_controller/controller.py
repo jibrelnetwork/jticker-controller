@@ -5,10 +5,11 @@ import random
 import time
 import uuid
 from functools import wraps
+from typing import Dict
 
 import backoff
 import mujson as json
-from addict import Dict
+from addict import Dict as AdDict
 from aiohttp import ClientSession, web
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import ConnectionError as KafkaConnectionError
@@ -46,7 +47,7 @@ class Controller(Service):
     }
 
     @inject
-    def __init__(self, web_server: WebServer, config: Dict, version: str):
+    def __init__(self, web_server: WebServer, config: AdDict, version: str):
         super().__init__()
         self.web_server = web_server
         self.config = config
@@ -57,7 +58,7 @@ class Controller(Service):
             key_serializer=lambda s: s.encode("utf-8"),
             value_serializer=lambda s: s.encode("utf-8"),
         )
-        self._time_series_by_host = {}
+        self._time_series_by_host: Dict[str, AbstractTimeSeriesStorage] = {}
         self._batches_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
         self._task_topic = config.kafka_tasks_topic
         self._assets_metadata_topic = config.kafka_trading_pairs_topic
@@ -125,7 +126,7 @@ class Controller(Service):
         host = request.match_info["host"]
         return await self.get_time_series(host)
 
-    @background_task_handler
+    @background_task_handler  # type: ignore
     async def _migrate(self, request):
         ts = await self.resolve_time_series(request)
         await ts.migrate()
