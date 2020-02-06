@@ -1,18 +1,17 @@
+import asyncio
 import collections
 import re
-import asyncio
-from functools import partial
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 import pytest
 from addict import Dict
 from aiohttp import ClientSession, web
 
-from jticker_core import injector, WebServer
-
-from jticker_controller.controller import Controller
 from jticker_controller import controller as controller_module
+from jticker_controller.controller import Controller
+from jticker_core import WebServer, injector
 
 
 class _FakeKafka:
@@ -203,7 +202,7 @@ async def _web_server(_web_app):
 
 @pytest.fixture
 async def controller(_web_server, time_series, clean_influx):
-    async with Controller(web_server=_web_server, time_series=time_series) as controller:
+    async with Controller(web_server=_web_server) as controller:
         yield controller
 
 

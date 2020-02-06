@@ -1,22 +1,24 @@
 import asyncio
-import uuid
 import collections
-import random
 import pickle
+import random
 import time
+import uuid
 from functools import wraps
+from typing import Dict
 
 import backoff
 import mujson as json
-from aiohttp import web, ClientSession
-from mode import Service
-from aiokafka import AIOKafkaProducer, AIOKafkaConsumer, TopicPartition
+from addict import Dict as AdDict
+from aiohttp import ClientSession, web
+from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import ConnectionError as KafkaConnectionError
-from addict import Dict
 from loguru import logger
+from mode import Service
 
-from jticker_core import (inject, register, WebServer, Task, RawTradingPair, Interval,
-                          Rate, normalize_kafka_topic, Candle, AbstractTimeSeriesStorage)
+from jticker_core import (AbstractTimeSeriesStorage, Candle, Interval, Rate, RawTradingPair, Task,
+                          WebServer, inject, normalize_kafka_topic, register)
+from jticker_core.time_series_storage.influx import InfluxTimeSeriesStorage
 
 
 class AsyncResourceContext:
@@ -45,10 +47,10 @@ class Controller(Service):
     }
 
     @inject
-    def __init__(self, web_server: WebServer, config: Dict, version: str,
-                 time_series: AbstractTimeSeriesStorage):
+    def __init__(self, web_server: WebServer, config: AdDict, version: str):
         super().__init__()
         self.web_server = web_server
+        self.config = config
         self._bootstrap_servers = config.kafka_bootstrap_servers.split(",")
         self._producer = AIOKafkaProducer(
             loop=asyncio.get_event_loop(),
@@ -56,8 +58,7 @@ class Controller(Service):
             key_serializer=lambda s: s.encode("utf-8"),
             value_serializer=lambda s: s.encode("utf-8"),
         )
-        self.influx_raw_url = f"http://{config.time_series_host}:{config.time_series_port}"
-        self.time_series = time_series
+        self._time_series_by_host: Dict[str, AbstractTimeSeriesStorage] = {}
         self._batches_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
         self._task_topic = config.kafka_tasks_topic
         self._assets_metadata_topic = config.kafka_trading_pairs_topic
@@ -67,11 +68,11 @@ class Controller(Service):
         self._configure_router()
 
     def _configure_router(self):
-        self.web_server.app.router.add_route("GET", "/storage/migrate",
-                                             self.background_task_handler(self._migrate))
+        self.web_server.app.router.add_route("GET", "/storage/{host}/migrate", self._migrate)
         self.web_server.app.router.add_route("POST", "/task/add", self._add_task)
-        self.web_server.app.router.add_route("GET", "/storage/query", self._storage_query)
-        self.web_server.app.router.add_route("*", "/storage/raw/query", self._storage_raw_query)
+        self.web_server.app.router.add_route("GET", "/storage/{host}/query", self._storage_query)
+        self.web_server.app.router.add_route("*", "/storage/{host}/raw/query",
+                                             self._storage_raw_query)
         self.web_server.app.router.add_route("GET", "/healthcheck", self._healthcheck)
         self.web_server.app.router.add_route("GET", "/ws/add_candles", self.add_candles_ws_handler)
         self.web_server.app.router.add_route("GET", "/list_topics", self.list_topics)
@@ -80,7 +81,6 @@ class Controller(Service):
     def on_init_dependencies(self):
         return [
             self.web_server,
-            self.time_series,
         ]
 
     @backoff.on_exception(
@@ -96,11 +96,11 @@ class Controller(Service):
         await self._raw_storage_session.close()
         await self._producer.stop()
 
-    def background_task_handler(self, f):
+    def background_task_handler(f):
         @wraps(f)
-        async def wrapper(*args, **kwargs):
+        async def wrapper(self, request):
             logger.info("scheduling {}", f.__name__)
-            self.add_future(f())
+            self.add_future(f(self, request))
             raise web.HTTPOk()
         return wrapper
 
@@ -114,15 +114,30 @@ class Controller(Service):
         )
         raise web.HTTPOk()
 
-    async def _migrate(self):
-        await self.time_series.migrate()
+    async def get_time_series(self, host: str) -> AbstractTimeSeriesStorage:
+        if host not in self._time_series_by_host:
+            config = self.config.copy()
+            config.time_series_host = host
+            ts = self._time_series_by_host[host] = InfluxTimeSeriesStorage(config)
+            await self.add_runtime_dependency(ts)
+        return self._time_series_by_host[host]
+
+    async def resolve_time_series(self, request: web.Request) -> AbstractTimeSeriesStorage:
+        host = request.match_info["host"]
+        return await self.get_time_series(host)
+
+    @background_task_handler  # type: ignore
+    async def _migrate(self, request):
+        ts = await self.resolve_time_series(request)
+        await ts.migrate()
 
     async def _storage_query(self, request):
         query = request.query.get("query")
         if query is None:
             raise web.HTTPBadRequest(reason="Missed query paraemeter `query`")
+        ts = await self.resolve_time_series(request)
         try:
-            result = await self.time_series.client.query(query)
+            result = await ts.client.query(query)
             result = {"status": "ok", "result": result}
         except asyncio.CancelledError:
             raise
@@ -131,9 +146,11 @@ class Controller(Service):
         return web.json_response(result)
 
     async def _storage_raw_query(self, request):
+        host = request.match_info["host"]
+        url = f"http://{host}:{self.config.time_series_port}/query"
         subrequest = self._raw_storage_session.request(
             request.method,
-            f"{self.influx_raw_url}/query",
+            url,
             params=request.query,
             data=await request.post(),
         )
