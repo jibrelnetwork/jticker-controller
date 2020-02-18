@@ -1,5 +1,6 @@
-from setuptools import setup
 from pathlib import Path
+
+from setuptools import setup
 
 
 def read_requirements(name: str):
@@ -13,6 +14,9 @@ version = Path("version.txt").read_text().strip().split("-")[0]
 setup(
     version=version,
     install_requires=read_requirements("requirements.txt") + ["jticker-core"],
+    package_data={
+        "": ["*.yml"],
+    },
     extras_require={
         "dev": read_requirements("requirements-dev.txt"),
     }

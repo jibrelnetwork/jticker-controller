@@ -4,6 +4,7 @@
 - sync with core uniform «objects»
 - multistage build
 - time series cluster support
+- api spec
 
 # 2.2.1 (2019-12-17)
 ## add
