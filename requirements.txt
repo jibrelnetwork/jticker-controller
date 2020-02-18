@@ -4,3 +4,4 @@ tabulate == 0.8.6
 # use orjson when possible
 ujson == 1.35
 mujson == 1.4
+jibrel-aiohttp-swagger==0.1.0
