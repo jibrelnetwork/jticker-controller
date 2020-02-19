@@ -5,6 +5,7 @@ import random
 import time
 import uuid
 from functools import wraps
+from importlib import resources
 from typing import Dict
 
 import backoff
@@ -13,6 +14,7 @@ from addict import Dict as AdDict
 from aiohttp import ClientSession, web
 from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
 from aiokafka.errors import ConnectionError as KafkaConnectionError
+from jibrel_aiohttp_swagger import setup_swagger
 from loguru import logger
 from mode import Service
 
@@ -77,6 +79,8 @@ class Controller(Service):
         self.web_server.app.router.add_route("GET", "/ws/add_candles", self.add_candles_ws_handler)
         self.web_server.app.router.add_route("GET", "/list_topics", self.list_topics)
         self.web_server.app.router.add_route("GET", "/ws/get_candles", self.get_candles_ws_handler)
+        with resources.path("jticker_controller", "api-spec.yml") as path:
+            setup_swagger(self.web_server.app, str(path))
 
     def on_init_dependencies(self):
         return [
