@@ -46,54 +46,54 @@ paths:
           description: Missed `query` parameter
   /storage/{host}/raw/query:
     summary: Raw transparent proxy to time series storage
-  /task/add:
-    post:
-      summary: Add grabber task
-      requestBody:
-        required: true
-        content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  providers:
-                    type: array
-                    example: ["bitfinex", "binance"]
-                    items:
-                      type: string
-                  symbols:
-                    type: array
-                    example: ["BTCUSD", "ETHUSD"]
-                    items:
-                      type: string
-                  from_dt:
-                    type: number
-                    example: 1234567
-                  to_dt:
-                    type: number
-                    example: 1234568
-                  interval:
-                    type: number
-                    example: 60
-      responses:
-        200:
-          description: Task triggered
-  /list_topics:
-    get:
-      summary: List kafka topics
-      responses:
-        200:
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: string
-                  example: bitfinex_BTCUSD_60
-  /ws/add_candles:
-    summary: Websocket add candles to kafka endpoint
-  /ws/get_candles:
-    summary: Websocket get candles from kafka endpoint
+  # /task/add:
+  #   post:
+  #     summary: Add grabber task
+  #     requestBody:
+  #       required: true
+  #       content:
+  #           application/json:
+  #             schema:
+  #               type: object
+  #               properties:
+  #                 providers:
+  #                   type: array
+  #                   example: ["bitfinex", "binance"]
+  #                   items:
+  #                     type: string
+  #                 symbols:
+  #                   type: array
+  #                   example: ["BTCUSD", "ETHUSD"]
+  #                   items:
+  #                     type: string
+  #                 from_dt:
+  #                   type: number
+  #                   example: 1234567
+  #                 to_dt:
+  #                   type: number
+  #                   example: 1234568
+  #                 interval:
+  #                   type: number
+  #                   example: 60
+  #     responses:
+  #       200:
+  #         description: Task triggered
+  # /list_topics:
+  #   get:
+  #     summary: List kafka topics
+  #     responses:
+  #       200:
+  #         content:
+  #           application/json:
+  #             schema:
+  #               type: array
+  #               items:
+  #                 type: string
+  #                 example: bitfinex_BTCUSD_60
+  # /ws/add_candles:
+  #   summary: Websocket add candles to kafka endpoint
+  # /ws/get_candles:
+  #   summary: Websocket get candles from kafka endpoint
   /healthcheck:
     get:
       summary: Controller healthcheck

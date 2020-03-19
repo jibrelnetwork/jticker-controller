@@ -1,25 +1,15 @@
 import asyncio
-import collections
-import pickle
-import random
-import time
-import uuid
 from functools import wraps
 from importlib import resources
 from typing import Dict
 
-import backoff
-import mujson as json
 from addict import Dict as AdDict
 from aiohttp import ClientSession, web
-from aiokafka import AIOKafkaConsumer, AIOKafkaProducer, TopicPartition
-from aiokafka.errors import ConnectionError as KafkaConnectionError
 from jibrel_aiohttp_swagger import setup_swagger
 from loguru import logger
 from mode import Service
 
-from jticker_core import (AbstractTimeSeriesStorage, Candle, Interval, Rate, RawTradingPair, Task,
-                          WebServer, inject, normalize_kafka_topic, register)
+from jticker_core import AbstractTimeSeriesStorage, Interval, WebServer, inject, register
 from jticker_core.time_series_storage.influx import InfluxTimeSeriesStorage
 
 
@@ -54,12 +44,6 @@ class Controller(Service):
         self.web_server = web_server
         self.config = config
         self._bootstrap_servers = config.kafka_bootstrap_servers.split(",")
-        self._producer = AIOKafkaProducer(
-            loop=asyncio.get_event_loop(),
-            bootstrap_servers=self._bootstrap_servers,
-            key_serializer=lambda s: s.encode("utf-8"),
-            value_serializer=lambda s: s.encode("utf-8"),
-        )
         self._time_series_by_host: Dict[str, AbstractTimeSeriesStorage] = {}
         self._batches_queue: asyncio.Queue = asyncio.Queue(maxsize=10)
         self._task_topic = config.kafka_tasks_topic
@@ -71,14 +55,10 @@ class Controller(Service):
 
     def _configure_router(self):
         self.web_server.app.router.add_route("GET", "/storage/{host}/migrate", self._migrate)
-        self.web_server.app.router.add_route("POST", "/task/add", self._add_task)
         self.web_server.app.router.add_route("GET", "/storage/{host}/query", self._storage_query)
         self.web_server.app.router.add_route("*", "/storage/{host}/raw/query",
                                              self._storage_raw_query)
         self.web_server.app.router.add_route("GET", "/healthcheck", self._healthcheck)
-        self.web_server.app.router.add_route("GET", "/ws/add_candles", self.add_candles_ws_handler)
-        self.web_server.app.router.add_route("GET", "/list_topics", self.list_topics)
-        self.web_server.app.router.add_route("GET", "/ws/get_candles", self.get_candles_ws_handler)
         with resources.path("jticker_controller", "api-spec.yml") as path:
             setup_swagger(self.web_server.app, str(path))
 
@@ -87,18 +67,11 @@ class Controller(Service):
             self.web_server,
         ]
 
-    @backoff.on_exception(
-        backoff.expo,
-        (KafkaConnectionError,),
-        max_time=120)
     async def on_started(self):
-        await self._producer.start()
-        self.add_future(self._batch_writer())
         self._raw_storage_session = ClientSession()
 
     async def on_stop(self):
         await self._raw_storage_session.close()
-        await self._producer.stop()
 
     def background_task_handler(f):
         @wraps(f)
@@ -107,16 +80,6 @@ class Controller(Service):
             self.add_future(f(self, request))
             raise web.HTTPOk()
         return wrapper
-
-    async def _add_task(self, request):
-        data = await request.json()
-        task = Task.from_dict(data)
-        await self._producer.send_and_wait(
-            self._task_topic,
-            value=task.to_json(),
-            key=uuid.uuid4().hex,
-        )
-        raise web.HTTPOk()
 
     async def get_time_series(self, host: str) -> AbstractTimeSeriesStorage:
         if host not in self._time_series_by_host:
@@ -167,154 +130,3 @@ class Controller(Service):
 
     async def _healthcheck(self, request):
         return web.json_response(dict(healthy=True, version=self._version))
-
-    async def _batch_writer(self):
-        rate = Rate(log_period=15, log_template="outgoing rate: {:.3f} candles/s")
-        while True:
-            topic, candles = await self._batches_queue.get()
-            partitions = await self._producer.partitions_for(topic)
-            batch = self._producer.create_batch()
-            for c in candles:
-                meta = batch.append(
-                    key=str(c["timestamp"]).encode("utf-8"),
-                    value=json.dumps(c).encode("utf-8"),
-                    timestamp=None,
-                )
-                if meta is None:
-                    partition = random.choice(tuple(partitions))
-                    await self._producer.send_batch(batch, topic, partition=partition)
-                    batch = self._producer.create_batch()
-                rate.inc()
-            partition = random.choice(tuple(partitions))
-            await self._producer.send_batch(batch, topic, partition=partition)
-            self._batches_queue.task_done()
-
-    async def _finalize_batches(self, batches, count):
-        logger.info("enque partial batches...")
-        while batches:
-            topic, batch = batches.popitem()
-            await self._batches_queue.put((topic, batch))
-        logger.info("awaiting queued batches stored...")
-        await self._batches_queue.join()
-        await self._producer.flush()
-        logger.info("{} candles added to kafka", count)
-
-    async def add_candles_ws_handler(self, request):
-        ws = web.WebSocketResponse()
-        await ws.prepare(request)
-        published_trading_pairs = {}
-        count = 0
-        logger.info("add candles ws opened")
-        rate = Rate(log_period=15, log_template="incoming rate: {:.3f} candles/s")
-        batches = collections.defaultdict(list)
-        last_candle_time_by_topic = {}
-        async for msg in ws:
-            for c in json.loads(msg.data):
-                try:
-                    # candle validation and normalization
-                    c = Candle.from_dict(c).to_dict(encode_json=True)
-                except Exception:
-                    logger.exception("can't build candle from {}", c)
-                    continue
-                if c["interval"] not in self.ALLOWED_CANDLE_INTERVALS:
-                    continue
-                tp_key = exchange, symbol = c["exchange"], c["symbol"]
-                if tp_key not in published_trading_pairs:
-                    trading_pair_key_string = f"{exchange}:{symbol}"
-                    topic = f"{exchange}_{symbol}_{c['interval']}"
-                    trading_pair = RawTradingPair(symbol, exchange, topic=topic)
-                    await self._producer.send(
-                        "assets_metadata",
-                        value=trading_pair.to_json(),
-                        key=trading_pair_key_string,
-                    )
-                    published_trading_pairs[tp_key] = topic
-                topic = published_trading_pairs[tp_key]
-                batch = batches[topic]
-                batch.append(c)
-                count += 1
-                rate.inc()
-                now = time.perf_counter()
-                last_candle_time_by_topic[topic] = now
-                if len(batch) >= self._add_candles_batch_size:
-                    batches.pop(topic)
-                    await self._batches_queue.put((topic, batch))
-                for topic, batch in list(batches.items()):
-                    last = last_candle_time_by_topic[topic]
-                    if now - last > self._add_candles_batch_timeout:
-                        batches.pop(topic)
-                        await self._batches_queue.put((topic, batch))
-        # can't do "await" things here, since cancelation
-        # https://docs.aiohttp.org/en/stable/web_advanced.html#web-handler-cancellation
-        self.add_future(self._finalize_batches(batches, count))
-        return ws
-
-    async def _read_kafka_asset_topics(self):
-        topics = []
-        c = AIOKafkaConsumer(
-            loop=asyncio.get_running_loop(),
-            bootstrap_servers=self._bootstrap_servers,
-            auto_offset_reset='earliest',
-        )
-        async with AsyncResourceContext(c) as consumer:
-            logger.info("start loading assets...")
-            partition = TopicPartition(self._assets_metadata_topic, 0)
-            last_known_offset = (await consumer.end_offsets([partition]))[partition]
-            logger.debug("last known assets metadata offset: {}", last_known_offset)
-            if last_known_offset <= 0:
-                logger.warning("no assets in kafka")
-                return topics
-            consumer.assign([partition])
-            await consumer.seek_to_beginning(partition)
-            async for msg in consumer:
-                try:
-                    data = json.loads(msg.value)
-                except json.JSONDecodeError:
-                    logger.error("can not decode trading pair from {!r}", msg.value)
-                else:
-                    topic = data.get("topic") or data.get("kafka_topic")
-                    if topic is None:
-                        logger.warning("can't resolve topic from {}", data)
-                    else:
-                        topics.append(topic)
-                finally:
-                    current_position = await consumer.position(partition)
-                    if current_position >= last_known_offset:
-                        break
-        return topics
-
-    async def list_topics(self, request):
-        topics = await self._read_kafka_asset_topics()
-        logger.info("found {} topics", len(topics))
-        return web.json_response(topics)
-
-    async def get_candles_ws_handler(self, request):
-        ws = web.WebSocketResponse()
-        await ws.prepare(request)
-        chunk = []
-        topic = normalize_kafka_topic(await ws.receive_json())
-        logger.info("dump topic {}", topic)
-        c = AIOKafkaConsumer(
-            topic,
-            loop=asyncio.get_running_loop(),
-            bootstrap_servers=self._bootstrap_servers,
-            auto_offset_reset='earliest',
-        )
-        async with AsyncResourceContext(c) as consumer:
-            partition = TopicPartition(topic, 0)
-            last_known_offset = (await consumer.end_offsets([partition]))[partition]
-            current_position = await consumer.position(partition)
-            if current_position < last_known_offset:
-                async for msg in consumer:
-                    chunk.append(msg)
-                    if len(chunk) >= 100:
-                        await ws.send_bytes(pickle.dumps(chunk))
-                        chunk = []
-                    current_position = await consumer.position(partition)
-                    if current_position >= last_known_offset:
-                        break
-                if chunk:
-                    await ws.send_bytes(pickle.dumps(chunk))
-        # eof token
-        await ws.send_bytes(b"")
-        return ws
